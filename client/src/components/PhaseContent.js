@@ -41,8 +41,9 @@ const PhaseContent = ({ phaseNumber, sessionData, chatId, onRetry, isRetrying })
 // Download Report Button Component
 const DownloadReportButton = ({ chatId }) => {
   const handleDownload = async () => {
+    const API_URL = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
     try {
-      const response = await fetch(`http://localhost:5000/api/report/${chatId}/download`, {
+      const response = await fetch(`${API_URL}/api/report/${chatId}/download`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/pdf',
