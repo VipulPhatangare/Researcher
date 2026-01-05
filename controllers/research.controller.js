@@ -74,32 +74,38 @@ export const initiateResearch = async (req, res) => {
         session.refinedProblem = n8nResponse.refinedProblem;
         session.subtopics = n8nResponse.subtopics || [];
         session.refineProblemEmbedding = n8nResponse.refineProblemEmbedding || null;
-        session.phases.phase1.status = 'completed';
-        session.phases.phase1.completedAt = new Date();
         session.phases.phase1.n8nWebhookSent = true;
         session.phases.phase1.n8nResponse = n8nResponse;
-        session.progress = 10;
 
-        await session.save();
-
-        // Validate subtopics before triggering Phase 2
-        console.log('🔍 Phase 1 Complete - Validating subtopics:', {
+        // Validate Phase 1 data before marking as completed
+        console.log('🔍 Phase 1 Complete - Validating data:', {
           chatId,
+          hasRefinedProblem: !!n8nResponse.refinedProblem,
           hasSubtopics: !!n8nResponse.subtopics,
           subtopicsCount: n8nResponse.subtopics?.length || 0,
-          subtopicsData: JSON.stringify(n8nResponse.subtopics),
-          hasRefinedProblem: !!n8nResponse.refinedProblem,
           hasEmbedding: !!n8nResponse.refineProblemEmbedding
         });
 
-        if (!n8nResponse.subtopics || n8nResponse.subtopics.length === 0) {
-          console.error(`❌ Phase 1 returned empty subtopics for chatId: ${chatId}`);
-          session.phases.phase2.status = 'failed';
-          session.phases.phase2.error = 'Phase 1 did not generate any subtopics';
+        const hasValidPhase1Data = n8nResponse.refinedProblem && 
+                                    n8nResponse.subtopics && 
+                                    n8nResponse.subtopics.length > 0;
+
+        if (!hasValidPhase1Data) {
+          console.error(`❌ Phase 1 returned invalid data for chatId: ${chatId}`);
+          session.phases.phase1.status = 'failed';
+          session.phases.phase1.completedAt = new Date();
+          session.phases.phase1.error = 'Phase 1 did not generate refinedProblem or subtopics';
           session.overallStatus = 'failed';
+          session.progress = 10;
           await session.save();
           return;
         }
+
+        // Mark Phase 1 as completed only if data is valid
+        session.phases.phase1.status = 'completed';
+        session.phases.phase1.completedAt = new Date();
+        session.progress = 10;
+        await session.save();
 
         // Automatically trigger Phase 2
         triggerPhase2(chatId, n8nResponse.refinedProblem, n8nResponse.subtopics, n8nResponse.refineProblemEmbedding);
@@ -159,6 +165,100 @@ export const getSessionStatus = async (req, res) => {
       });
     }
 
+    // AUTO-FIX: Validate all completed phases have proper data
+    let wasFixed = false;
+    
+    // Phase 1: Check refinedProblem and subtopics
+    if (session.phases.phase1.status === 'completed') {
+      const hasValidPhase1Data = session.refinedProblem && 
+                                  session.subtopics && 
+                                  session.subtopics.length > 0;
+      
+      if (!hasValidPhase1Data) {
+        session.phases.phase1.status = 'failed';
+        session.phases.phase1.error = 'Phase 1 was completed but refinedProblem or subtopics are missing. Please retry Phase 1.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
+        await session.save();
+      }
+    }
+    
+    // Phase 2: Check papers array has data
+    if (session.phases.phase2.status === 'completed') {
+      const hasValidPhase2Data = session.papers && 
+                                  session.papers.length > 0 &&
+                                  session.papers.some(p => p.pdfLink);
+      
+      if (!hasValidPhase2Data) {
+        session.phases.phase2.status = 'failed';
+        session.phases.phase2.error = 'Phase 2 was completed but no papers with PDF links were found. Please retry Phase 2.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
+        await session.save();
+      }
+    }
+    
+    // Phase 3: Check papers have enriched data
+    if (session.phases.phase3.status === 'completed') {
+      const hasValidPhase3Data = session.papers && 
+                                  session.papers.length > 0 &&
+                                  session.papers.some(p => p.summary && p.methodology);
+      
+      if (!hasValidPhase3Data) {
+        session.phases.phase3.status = 'failed';
+        session.phases.phase3.error = 'Phase 3 was completed but papers lack analysis data (summary/methodology). Please retry Phase 3.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - papers not enriched`);
+        await session.save();
+      }
+    }
+    
+    // Phase 4: Check phase4Analysis has data
+    if (session.phases.phase4.status === 'completed') {
+      const hasValidPhase4Data = session.phase4Analysis && (
+        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
+        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
+        (session.phase4Analysis.datasetsUsed?.length > 0) ||
+        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
+      );
+
+      if (!hasValidPhase4Data) {
+        session.phases.phase4.status = 'failed';
+        session.phases.phase4.error = 'Phase 4 was completed but phase4Analysis is empty. Data was not properly saved. Please retry Phase 4.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 4 status for chatId: ${chatId} - phase4Analysis is empty`);
+        await session.save();
+      }
+    }
+    
+    // Phase 5: Check phase5Solutions has data
+    if (session.phases.phase5.status === 'completed') {
+      const hasValidPhase5Data = session.phase5Solutions && 
+                                  session.phase5Solutions.length > 0;
+      
+      if (!hasValidPhase5Data) {
+        session.phases.phase5.status = 'failed';
+        session.phases.phase5.error = 'Phase 5 was completed but phase5Solutions is empty. Please retry Phase 5.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 5 status for chatId: ${chatId} - no solutions found`);
+        await session.save();
+      }
+    }
+    
+    // Phase 6: Check phase6Solution exists
+    if (session.phases.phase6.status === 'completed') {
+      const hasValidPhase6Data = session.phase6Solution && 
+                                  session.phase6Solution.proposedSolution;
+      
+      if (!hasValidPhase6Data) {
+        session.phases.phase6.status = 'failed';
+        session.phases.phase6.error = 'Phase 6 was completed but phase6Solution is missing. Please retry Phase 6.';
+        wasFixed = true;
+        console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
+        await session.save();
+      }
+    }
+
     res.status(200).json({
       success: true,
       data: {
@@ -169,13 +269,15 @@ export const getSessionStatus = async (req, res) => {
         phase1Status: session.phases.phase1.status,
         phase2Status: session.phases.phase2.status,
         phase3Status: session.phases.phase3.status,
+        phase4Status: session.phases.phase4.status,
         enhancedInput: session.enhancedInput,
         refinedProblem: session.refinedProblem,
         subtopics: session.subtopics,
         subtopicsCount: session.subtopics?.length || 0,
         phase2Data: session.phases.phase2.phase2Data,
         createdAt: session.createdAt,
-        updatedAt: session.updatedAt
+        updatedAt: session.updatedAt,
+        autoFixed: wasFixed
       }
     });
 
@@ -204,6 +306,99 @@ export const getSessionDetails = async (req, res) => {
         success: false,
         error: 'Research session not found'
       });
+    }
+
+    // AUTO-FIX: Validate all completed phases have proper data
+    let needsSave = false;
+    
+    // Phase 1: Check refinedProblem and subtopics
+    if (session.phases.phase1.status === 'completed') {
+      const hasValidPhase1Data = session.refinedProblem && 
+                                  session.subtopics && 
+                                  session.subtopics.length > 0;
+      
+      if (!hasValidPhase1Data) {
+        session.phases.phase1.status = 'failed';
+        session.phases.phase1.error = 'Phase 1 was completed but refinedProblem or subtopics are missing. Please retry Phase 1.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
+      }
+    }
+    
+    // Phase 2: Check papers array has data
+    if (session.phases.phase2.status === 'completed') {
+      const hasValidPhase2Data = session.papers && 
+                                  session.papers.length > 0 &&
+                                  session.papers.some(p => p.pdfLink);
+      
+      if (!hasValidPhase2Data) {
+        session.phases.phase2.status = 'failed';
+        session.phases.phase2.error = 'Phase 2 was completed but no papers with PDF links were found. Please retry Phase 2.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
+      }
+    }
+    
+    // Phase 3: Check papers have enriched data
+    if (session.phases.phase3.status === 'completed') {
+      const hasValidPhase3Data = session.papers && 
+                                  session.papers.length > 0 &&
+                                  session.papers.some(p => p.summary && p.methodology);
+      
+      if (!hasValidPhase3Data) {
+        session.phases.phase3.status = 'failed';
+        session.phases.phase3.error = 'Phase 3 was completed but papers lack analysis data (summary/methodology). Please retry Phase 3.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - papers not enriched`);
+      }
+    }
+    
+    // Phase 4: Check phase4Analysis has data
+    if (session.phases.phase4.status === 'completed') {
+      const hasValidPhase4Data = session.phase4Analysis && (
+        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
+        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
+        (session.phase4Analysis.datasetsUsed?.length > 0) ||
+        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
+      );
+
+      if (!hasValidPhase4Data) {
+        session.phases.phase4.status = 'failed';
+        session.phases.phase4.error = 'Phase 4 was completed but phase4Analysis is empty. Data was not properly saved. Please retry Phase 4.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 4 status for chatId: ${chatId} - phase4Analysis is empty`);
+      }
+    }
+    
+    // Phase 5: Check phase5Solutions has data
+    if (session.phases.phase5.status === 'completed') {
+      const hasValidPhase5Data = session.phase5Solutions && 
+                                  session.phase5Solutions.length > 0;
+      
+      if (!hasValidPhase5Data) {
+        session.phases.phase5.status = 'failed';
+        session.phases.phase5.error = 'Phase 5 was completed but phase5Solutions is empty. Please retry Phase 5.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 5 status for chatId: ${chatId} - no solutions found`);
+      }
+    }
+    
+    // Phase 6: Check phase6Solution exists
+    if (session.phases.phase6.status === 'completed') {
+      const hasValidPhase6Data = session.phase6Solution && 
+                                  session.phase6Solution.proposedSolution;
+      
+      if (!hasValidPhase6Data) {
+        session.phases.phase6.status = 'failed';
+        session.phases.phase6.error = 'Phase 6 was completed but phase6Solution is missing. Please retry Phase 6.';
+        needsSave = true;
+        console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
+      }
+    }
+    
+    // Save if any phase was fixed
+    if (needsSave) {
+      await session.save();
     }
 
     res.status(200).json({
@@ -544,6 +739,22 @@ const triggerPhase2 = async (chatId, refinedProblem, subtopics, embedding) => {
       return;
     }
 
+    // Check if Phase 2 is already completed with valid data
+    if (session.phases.phase2.status === 'completed') {
+      const hasValidData = session.papers && session.papers.length > 0 && session.papers.some(p => p.pdfLink);
+      if (hasValidData) {
+        console.log(`⏭️ Phase 2 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 3 if not completed
+        if (session.phases.phase3.status !== 'completed') {
+          const pdfLinks = session.papers.map(p => p.pdfLink).filter(link => link);
+          if (pdfLinks.length > 0) {
+            triggerPhase3(chatId, pdfLinks);
+          }
+        }
+        return;
+      }
+    }
+
     // Update Phase 2 status to processing
     session.phases.phase2.status = 'processing';
     session.phases.phase2.startedAt = new Date();
@@ -635,6 +846,19 @@ const triggerPhase3 = async (chatId, pdfLinks) => {
     if (!session) {
       console.error(`Session not found for chatId: ${chatId}`);
       return;
+    }
+
+    // Check if Phase 3 is already completed with valid data
+    if (session.phases.phase3.status === 'completed') {
+      const hasValidData = session.papers && session.papers.length > 0 && session.papers.some(p => p.summary && p.methodology);
+      if (hasValidData) {
+        console.log(`⏭️ Phase 3 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 4 if not completed
+        if (session.phases.phase4.status !== 'completed' && session.refinedProblem) {
+          triggerPhase4(chatId, session.refinedProblem);
+        }
+        return;
+      }
     }
 
     // Update Phase 3 status to processing
@@ -761,6 +985,24 @@ const triggerPhase4 = async (chatId, refinedProblem) => {
       return;
     }
 
+    // Check if Phase 4 is already completed with valid data
+    if (session.phases.phase4.status === 'completed') {
+      const hasValidData = session.phase4Analysis && (
+        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
+        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
+        (session.phase4Analysis.datasetsUsed?.length > 0) ||
+        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
+      );
+      if (hasValidData) {
+        console.log(`⏭️ Phase 4 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 5 if not completed
+        if (session.phases.phase5.status !== 'completed' && refinedProblem) {
+          triggerPhase5(chatId, refinedProblem);
+        }
+        return;
+      }
+    }
+
     // Update Phase 4 status to processing
     session.phases.phase4.status = 'processing';
     session.phases.phase4.startedAt = new Date();
@@ -819,29 +1061,38 @@ const triggerPhase4 = async (chatId, refinedProblem) => {
         updatedSession.phases.phase4.n8nResponse = phase4Response;
         updatedSession.phases.phase4.phase4Data = phase4Response.phase4Data;
         
-        // Check if we got analysis data
-        if (cleanedOutput && (
-          cleanedOutput.most_common_methodologies?.length > 0 ||
-          cleanedOutput.technology_or_algorithms?.length > 0 ||
-          cleanedOutput.datasets_used?.length > 0 ||
-          cleanedOutput.unique_or_less_common_approaches?.length > 0
-        )) {
+        // CRITICAL VALIDATION: Check phase4Analysis in database (not just cleanedOutput)
+        // This ensures phase4Analysis was actually populated, not just received a response
+        const hasValidAnalysisData = updatedSession.phase4Analysis && (
+          (updatedSession.phase4Analysis.mostCommonMethodologies?.length > 0) ||
+          (updatedSession.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
+          (updatedSession.phase4Analysis.datasetsUsed?.length > 0) ||
+          (updatedSession.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
+        );
+        
+        if (hasValidAnalysisData) {
           updatedSession.phases.phase4.status = 'completed';
           updatedSession.phases.phase4.completedAt = new Date();
           updatedSession.progress = 70;
           await updatedSession.save();
           
+          console.log(`✅ Phase 4 completed successfully for chatId: ${chatId}`);
+          
           // Automatically trigger Phase 5 after Phase 4 completion
           triggerPhase5(chatId, refinedProblem);
         } else {
-          // No analysis data - mark Phase 4 as failed
+          // No analysis data in phase4Analysis - mark Phase 4 as failed
           updatedSession.phases.phase4.status = 'failed';
           updatedSession.phases.phase4.completedAt = new Date();
-          updatedSession.phases.phase4.error = 'No analysis data received from n8n';
+          updatedSession.phases.phase4.error = 'Phase 4 completed but phase4Analysis is empty. Data parsing or structure mismatch detected.';
           updatedSession.progress = 60;
           await updatedSession.save();
           
-          console.error(`❌ Phase 4 webhook responded but no analysis data for chatId: ${chatId}`);
+          console.error(`❌ Phase 4 webhook responded but phase4Analysis is empty for chatId: ${chatId}`, {
+            hadCleanedOutput: !!cleanedOutput,
+            phase4DataKeys: phase4Response.phase4Data ? Object.keys(phase4Response.phase4Data) : [],
+            phase4AnalysisState: updatedSession.phase4Analysis
+          });
         }
       })
       .catch(async (error) => {
@@ -875,6 +1126,19 @@ const triggerPhase5 = async (chatId, refinedProblem) => {
       return;
     }
 
+    // Check if Phase 5 is already completed with valid data
+    if (session.phases.phase5.status === 'completed') {
+      const hasValidData = session.phase5Solutions && session.phase5Solutions.length > 0;
+      if (hasValidData) {
+        console.log(`⏭️ Phase 5 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 6 if not completed
+        if (session.phases.phase6.status !== 'completed' && refinedProblem) {
+          triggerPhase6(chatId, refinedProblem);
+        }
+        return;
+      }
+    }
+
     // Update Phase 5 status to processing
     session.phases.phase5.status = 'processing';
     session.phases.phase5.startedAt = new Date();
@@ -905,8 +1169,8 @@ const triggerPhase5 = async (chatId, refinedProblem) => {
           notes = '';
         }
         
+        // Map solutions to database format
         if (solutions && solutions.length > 0) {
-          // Map solutions to database format
           updatedSession.phase5Solutions = solutions.map(sol => ({
             title: sol.title || '',
             summary: sol.summary || '',
@@ -923,18 +1187,35 @@ const triggerPhase5 = async (chatId, refinedProblem) => {
           updatedSession.markModified('phase5Solutions');
         }
         
-        updatedSession.phases.phase5.status = 'completed';
-        updatedSession.phases.phase5.completedAt = new Date();
         updatedSession.phases.phase5.n8nWebhookSent = true;
         updatedSession.phases.phase5.n8nResponse = phase5Response;
         updatedSession.phases.phase5.phase5Data = phase5Response.phase5Data;
-        updatedSession.progress = 85;
-        updatedSession.overallStatus = 'processing';
         
-        await updatedSession.save();
+        // Validate Phase 5 data before marking as completed
+        const hasValidPhase5Data = updatedSession.phase5Solutions && 
+                                    updatedSession.phase5Solutions.length > 0;
         
-        // Automatically trigger Phase 6
-        triggerPhase6(chatId, refinedProblem);
+        if (hasValidPhase5Data) {
+          updatedSession.phases.phase5.status = 'completed';
+          updatedSession.phases.phase5.completedAt = new Date();
+          updatedSession.progress = 85;
+          updatedSession.overallStatus = 'processing';
+          await updatedSession.save();
+          
+          console.log(`✅ Phase 5 completed successfully for chatId: ${chatId}`);
+          
+          // Automatically trigger Phase 6
+          triggerPhase6(chatId, refinedProblem);
+        } else {
+          // No solutions found - mark Phase 5 as failed
+          updatedSession.phases.phase5.status = 'failed';
+          updatedSession.phases.phase5.completedAt = new Date();
+          updatedSession.phases.phase5.error = 'Phase 5 completed but no solutions were found';
+          updatedSession.progress = 75;
+          await updatedSession.save();
+          
+          console.error(`❌ Phase 5 webhook responded but no solutions for chatId: ${chatId}`);
+        }
       })
       .catch(async (error) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
@@ -959,6 +1240,20 @@ const triggerPhase5 = async (chatId, refinedProblem) => {
 const triggerPhase6 = async (chatId, refinedProblem) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
+    
+    if (!session) {
+      console.error(`Session not found for chatId: ${chatId}`);
+      return;
+    }
+
+    // Check if Phase 6 is already completed with valid data
+    if (session.phases.phase6.status === 'completed') {
+      const hasValidData = session.phase6Solution && session.phase6Solution.proposedSolution;
+      if (hasValidData) {
+        console.log(`⏭️ Phase 6 already completed for chatId: ${chatId}, skipping...`);
+        return;
+      }
+    }
     
     session.phases.phase6.status = 'processing';
     session.phases.phase6.startedAt = new Date();
@@ -1021,18 +1316,36 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
           updatedSession.markModified('phase6Solution');
         }
         
-        updatedSession.phases.phase6.status = 'completed';
-        updatedSession.phases.phase6.completedAt = new Date();
         updatedSession.phases.phase6.n8nWebhookSent = true;
         updatedSession.phases.phase6.n8nResponse = phase6Response;
         updatedSession.phases.phase6.phase6Data = phase6Response.phase6Data;
-        updatedSession.progress = 100;
-        updatedSession.overallStatus = 'completed';
         
-        await updatedSession.save();
+        // Validate Phase 6 data before marking as completed
+        const hasValidPhase6Data = updatedSession.phase6Solution && 
+                                    updatedSession.phase6Solution.proposedSolution;
+        
+        if (hasValidPhase6Data) {
+          updatedSession.phases.phase6.status = 'completed';
+          updatedSession.phases.phase6.completedAt = new Date();
+          updatedSession.progress = 100;
+          updatedSession.overallStatus = 'completed';
+          await updatedSession.save();
+          
+          console.log(`✅ Phase 6 completed successfully for chatId: ${chatId}`);
+        } else {
+          // No solution proposal - mark Phase 6 as failed
+          updatedSession.phases.phase6.status = 'failed';
+          updatedSession.phases.phase6.completedAt = new Date();
+          updatedSession.phases.phase6.error = 'Phase 6 completed but phase6Solution is missing or invalid';
+          updatedSession.progress = 90;
+          updatedSession.overallStatus = 'completed'; // Phase 5 was still successful
+          await updatedSession.save();
+          
+          console.error(`❌ Phase 6 webhook responded but no valid solution for chatId: ${chatId}`);
+        }
       })
       .catch(async (error) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+        const updatedSession = await ResearchSession.findOne({ chatId});
         
         updatedSession.phases.phase6.status = 'failed';
         updatedSession.phases.phase6.completedAt = new Date();
