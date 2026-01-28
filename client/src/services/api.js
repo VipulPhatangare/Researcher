@@ -110,7 +110,44 @@ export const stopPhase = async (chatId, phase) => {
 
   if (!response.ok) {
     const error = await response.json();
+    // console.error('Stop phase API error:', error);
     throw new Error(error.error || 'Failed to stop phase');
+  }
+
+  return response.json();
+};
+
+/**
+ * Submit expected outcome after Phase 5
+ */
+export const submitExpectedOutcome = async (chatId, expectedOutcome) => {
+  const response = await fetch(`${API_BASE_URL}/research/${chatId}/submit-outcome`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ expectedOutcome }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to submit expected outcome');
+  }
+
+  return response.json();
+};
+
+/**
+ * Update expected outcome without triggering Phase 6 (for retries)
+ */
+export const updateExpectedOutcome = async (chatId, expectedOutcome) => {
+  const response = await fetch(`${API_BASE_URL}/research/${chatId}/update-outcome`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ expectedOutcome }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to update expected outcome');
   }
 
   return response.json();

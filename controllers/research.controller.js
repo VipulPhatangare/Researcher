@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 import ResearchSession from '../models/ResearchSession.model.js';
 import User from '../models/user.model.js';
-import { sendToN8nWebhook, sendToPhase2Webhook, sendToPhase3Webhook, sendToPhase4Webhook, sendToPhase5Webhook, sendToPhase6Webhook } from '../services/n8n.service.js';
+import { sendToN8nWebhook, sendToPhase2Webhook, sendToPhase2ApplicationsWebhook, sendToPhase2GitHubWebhook, sendToPhase3Webhook, sendToPhase3ResearchPaperWebhook, sendToPhase3GitHubWebhook, sendToPhase4Webhook, sendToPhase4ResearchPaperWebhook, sendToPhase4GitHubWebhook, sendToPhase4ApplicationWebhook, sendToPhase4GapFinderWebhook, sendToPhase5LiteratureReviewWebhook, sendToPhase6Webhook } from '../services/n8n.service.js';
 import { cleanAbstract } from '../utils/textCleaner.js';
 
 /**
@@ -73,25 +74,17 @@ export const initiateResearch = async (req, res) => {
         session.enhancedInput = n8nResponse.enhancedPrompt || problemStatement;
         session.refinedProblem = n8nResponse.refinedProblem;
         session.subtopics = n8nResponse.subtopics || [];
-        session.refineProblemEmbedding = n8nResponse.refineProblemEmbedding || null;
+        // Note: embeddings are not stored to save database space
         session.phases.phase1.n8nWebhookSent = true;
         session.phases.phase1.n8nResponse = n8nResponse;
 
         // Validate Phase 1 data before marking as completed
-        console.log('🔍 Phase 1 Complete - Validating data:', {
-          chatId,
-          hasRefinedProblem: !!n8nResponse.refinedProblem,
-          hasSubtopics: !!n8nResponse.subtopics,
-          subtopicsCount: n8nResponse.subtopics?.length || 0,
-          hasEmbedding: !!n8nResponse.refineProblemEmbedding
-        });
-
         const hasValidPhase1Data = n8nResponse.refinedProblem && 
                                     n8nResponse.subtopics && 
                                     n8nResponse.subtopics.length > 0;
 
         if (!hasValidPhase1Data) {
-          console.error(`❌ Phase 1 returned invalid data for chatId: ${chatId}`);
+          // console.error(`❌ Phase 1 returned invalid data for chatId: ${chatId}`);
           session.phases.phase1.status = 'failed';
           session.phases.phase1.completedAt = new Date();
           session.phases.phase1.error = 'Phase 1 did not generate refinedProblem or subtopics';
@@ -107,8 +100,8 @@ export const initiateResearch = async (req, res) => {
         session.progress = 10;
         await session.save();
 
-        // Automatically trigger Phase 2
-        triggerPhase2(chatId, n8nResponse.refinedProblem, n8nResponse.subtopics, n8nResponse.refineProblemEmbedding);
+        // Automatically trigger Phase 2 (embeddings not stored)
+        triggerPhase2(chatId, n8nResponse.refinedProblem, n8nResponse.subtopics);
       })
       .catch(async (error) => {
         // Handle n8n webhook error
@@ -121,7 +114,7 @@ export const initiateResearch = async (req, res) => {
 
         await session.save();
 
-        console.error(`❌ Phase 1 failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 1 failed for chatId: ${chatId}`, error.message);
       });
 
     // Return immediate response with chatId
@@ -139,7 +132,7 @@ export const initiateResearch = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error initiating research:', error);
+    // console.error('Error initiating research:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to initiate research session',
@@ -156,7 +149,9 @@ export const getSessionStatus = async (req, res) => {
   try {
     const { chatId } = req.params;
 
-    const session = await ResearchSession.findOne({ chatId });
+    // Only select fields needed for status check and validation
+    const session = await ResearchSession.findOne({ chatId })
+      .select('chatId currentPhase overallStatus progress phases refinedProblem subtopics enhancedInput papers._id papers.pdfLink phase6Solution createdAt updatedAt');
 
     if (!session) {
       return res.status(404).json({
@@ -178,7 +173,7 @@ export const getSessionStatus = async (req, res) => {
         session.phases.phase1.status = 'failed';
         session.phases.phase1.error = 'Phase 1 was completed but refinedProblem or subtopics are missing. Please retry Phase 1.';
         wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
+        // console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
         await session.save();
       }
     }
@@ -193,57 +188,29 @@ export const getSessionStatus = async (req, res) => {
         session.phases.phase2.status = 'failed';
         session.phases.phase2.error = 'Phase 2 was completed but no papers with PDF links were found. Please retry Phase 2.';
         wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
+        // console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
         await session.save();
       }
     }
     
-    // Phase 3: Check papers have enriched data
+    // Phase 3: Check at least one sub-phase completed
     if (session.phases.phase3.status === 'completed') {
-      const hasValidPhase3Data = session.papers && 
-                                  session.papers.length > 0 &&
-                                  session.papers.some(p => p.summary && p.methodology);
+      const paperAnalysisCompleted = session.phases.phase3.researchPaperAnalysis?.completed;
+      const githubAnalysisCompleted = session.phases.phase3.githubAnalysis?.completed;
+      const hasValidPhase3Data = paperAnalysisCompleted || githubAnalysisCompleted;
       
       if (!hasValidPhase3Data) {
         session.phases.phase3.status = 'failed';
-        session.phases.phase3.error = 'Phase 3 was completed but papers lack analysis data (summary/methodology). Please retry Phase 3.';
+        session.phases.phase3.error = 'Phase 3 was completed but neither sub-phase completed successfully. Please retry Phase 3.';
         wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - papers not enriched`);
+        // console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - no sub-phases completed`);
         await session.save();
       }
     }
     
-    // Phase 4: Check phase4Analysis has data
-    if (session.phases.phase4.status === 'completed') {
-      const hasValidPhase4Data = session.phase4Analysis && (
-        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
-        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
-        (session.phase4Analysis.datasetsUsed?.length > 0) ||
-        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
-      );
-
-      if (!hasValidPhase4Data) {
-        session.phases.phase4.status = 'failed';
-        session.phases.phase4.error = 'Phase 4 was completed but phase4Analysis is empty. Data was not properly saved. Please retry Phase 4.';
-        wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 4 status for chatId: ${chatId} - phase4Analysis is empty`);
-        await session.save();
-      }
-    }
     
-    // Phase 5: Check phase5Solutions has data
-    if (session.phases.phase5.status === 'completed') {
-      const hasValidPhase5Data = session.phase5Solutions && 
-                                  session.phase5Solutions.length > 0;
-      
-      if (!hasValidPhase5Data) {
-        session.phases.phase5.status = 'failed';
-        session.phases.phase5.error = 'Phase 5 was completed but phase5Solutions is empty. Please retry Phase 5.';
-        wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 5 status for chatId: ${chatId} - no solutions found`);
-        await session.save();
-      }
-    }
+    // Phase 4 removed - Phase 3 now triggers Phase 6 directly
+    // Phase 5 removed - applications moved to Phase 2
     
     // Phase 6: Check phase6Solution exists
     if (session.phases.phase6.status === 'completed') {
@@ -254,7 +221,7 @@ export const getSessionStatus = async (req, res) => {
         session.phases.phase6.status = 'failed';
         session.phases.phase6.error = 'Phase 6 was completed but phase6Solution is missing. Please retry Phase 6.';
         wasFixed = true;
-        console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
+        // console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
         await session.save();
       }
     }
@@ -282,7 +249,7 @@ export const getSessionStatus = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching session status:', error);
+    // console.error('Error fetching session status:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch session status',
@@ -299,7 +266,9 @@ export const getSessionDetails = async (req, res) => {
   try {
     const { chatId } = req.params;
 
-    const session = await ResearchSession.findOne({ chatId });
+    // Exclude large internal response objects that are never displayed in UI
+    const session = await ResearchSession.findOne({ chatId })
+      .select('-phases.phase1.n8nResponse -phases.phase2.n8nResponse -phases.phase3.n8nResponse -phases.phase4.n8nResponse -phases.phase5.n8nResponse -phases.phase6.n8nResponse -phases.phase1.phase2Data -phases.phase2.response -phases.phase3.response -phases.phase4.response -phases.phase5.response -phases.phase6.response');
 
     if (!session) {
       return res.status(404).json({
@@ -321,7 +290,7 @@ export const getSessionDetails = async (req, res) => {
         session.phases.phase1.status = 'failed';
         session.phases.phase1.error = 'Phase 1 was completed but refinedProblem or subtopics are missing. Please retry Phase 1.';
         needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
+        // console.warn(`⚠️ Auto-fixed Phase 1 status for chatId: ${chatId} - missing refinedProblem or subtopics`);
       }
     }
     
@@ -335,53 +304,27 @@ export const getSessionDetails = async (req, res) => {
         session.phases.phase2.status = 'failed';
         session.phases.phase2.error = 'Phase 2 was completed but no papers with PDF links were found. Please retry Phase 2.';
         needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
+        // console.warn(`⚠️ Auto-fixed Phase 2 status for chatId: ${chatId} - no papers found`);
       }
     }
     
-    // Phase 3: Check papers have enriched data
+    // Phase 3: Check at least one sub-phase completed
     if (session.phases.phase3.status === 'completed') {
-      const hasValidPhase3Data = session.papers && 
-                                  session.papers.length > 0 &&
-                                  session.papers.some(p => p.summary && p.methodology);
+      const paperAnalysisCompleted = session.phases.phase3.researchPaperAnalysis?.completed;
+      const githubAnalysisCompleted = session.phases.phase3.githubAnalysis?.completed;
+      const hasValidPhase3Data = paperAnalysisCompleted || githubAnalysisCompleted;
       
       if (!hasValidPhase3Data) {
         session.phases.phase3.status = 'failed';
-        session.phases.phase3.error = 'Phase 3 was completed but papers lack analysis data (summary/methodology). Please retry Phase 3.';
+        session.phases.phase3.error = 'Phase 3 was completed but neither sub-phase completed successfully. Please retry Phase 3.';
         needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - papers not enriched`);
+        // console.warn(`⚠️ Auto-fixed Phase 3 status for chatId: ${chatId} - no sub-phases completed`);
       }
     }
     
-    // Phase 4: Check phase4Analysis has data
-    if (session.phases.phase4.status === 'completed') {
-      const hasValidPhase4Data = session.phase4Analysis && (
-        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
-        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
-        (session.phase4Analysis.datasetsUsed?.length > 0) ||
-        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
-      );
-
-      if (!hasValidPhase4Data) {
-        session.phases.phase4.status = 'failed';
-        session.phases.phase4.error = 'Phase 4 was completed but phase4Analysis is empty. Data was not properly saved. Please retry Phase 4.';
-        needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 4 status for chatId: ${chatId} - phase4Analysis is empty`);
-      }
-    }
     
-    // Phase 5: Check phase5Solutions has data
-    if (session.phases.phase5.status === 'completed') {
-      const hasValidPhase5Data = session.phase5Solutions && 
-                                  session.phase5Solutions.length > 0;
-      
-      if (!hasValidPhase5Data) {
-        session.phases.phase5.status = 'failed';
-        session.phases.phase5.error = 'Phase 5 was completed but phase5Solutions is empty. Please retry Phase 5.';
-        needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 5 status for chatId: ${chatId} - no solutions found`);
-      }
-    }
+    // Phase 4 removed - Phase 3 now triggers Phase 6 directly
+    // Phase 5 removed - applications moved to Phase 2
     
     // Phase 6: Check phase6Solution exists
     if (session.phases.phase6.status === 'completed') {
@@ -392,7 +335,7 @@ export const getSessionDetails = async (req, res) => {
         session.phases.phase6.status = 'failed';
         session.phases.phase6.error = 'Phase 6 was completed but phase6Solution is missing. Please retry Phase 6.';
         needsSave = true;
-        console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
+        // console.warn(`⚠️ Auto-fixed Phase 6 status for chatId: ${chatId} - no solution proposal`);
       }
     }
     
@@ -407,7 +350,7 @@ export const getSessionDetails = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching session details:', error);
+    // console.error('Error fetching session details:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to fetch session details',
@@ -486,7 +429,6 @@ export const retryPhase = async (req, res) => {
         case 1:
           session.refinedProblem = '';
           session.subtopics = [];
-          session.embedding = [];
           break;
         case 2:
           session.papers = [];
@@ -503,16 +445,10 @@ export const retryPhase = async (req, res) => {
           }));
           break;
         case 4:
-          session.phase4Analysis = {
-            mostCommonMethodologies: [],
-            technologyOrAlgorithms: [],
-            datasetsUsed: [],
-            uniqueOrLessCommonApproaches: []
-          };
+          session.phase4GapAnalysis = null;
           break;
         case 5:
-          session.phase5Solutions = [];
-          session.phase5Notes = '';
+          // Phase 5 was removed - applications moved to Phase 2
           break;
         case 6:
           session.phase6Solution = null;
@@ -540,7 +476,7 @@ export const retryPhase = async (req, res) => {
         triggerFunction = () => triggerPhase1Retry(chatId, session.originalInput);
         break;
       case 2:
-        triggerFunction = () => triggerPhase2Retry(chatId, session.refinedProblem, session.subtopics, session.embedding, deleteExisting);
+        triggerFunction = () => triggerPhase2Retry(chatId, session.refinedProblem, session.subtopics, deleteExisting);
         break;
       case 3:
         triggerFunction = () => triggerPhase3Retry(chatId, session.papers, deleteExisting);
@@ -554,6 +490,8 @@ export const retryPhase = async (req, res) => {
       case 6:
         triggerFunction = () => triggerPhase6Retry(chatId, session.refinedProblem, deleteExisting);
         break;
+      case 7:
+        return res.status(400).json({ error: 'Phase 7 (Chat) cannot be retried. It is an interactive phase.' });
     }
 
     // Execute in background
@@ -571,7 +509,7 @@ export const retryPhase = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error in retryPhase:', error);
+    // console.error('Error in retryPhase:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -586,10 +524,19 @@ export const getAllSessions = async (req, res) => {
     const skip = (page - 1) * limit;
     const userEmail = req.query.userEmail;
 
+    // Check if database is connected
+    if (!mongoose.connection.readyState) {
+      return res.status(503).json({
+        success: false,
+        error: 'Database connection unavailable',
+        details: 'Please check your database connection and try again'
+      });
+    }
+
     // Build query based on user email
     let query = {};
     if (userEmail) {
-      const user = await User.findOne({ email: userEmail }).select('researchSessions');
+      const user = await User.findOne({ email: userEmail }).select('researchSessions').maxTimeMS(5000);
       if (user && user.researchSessions.length > 0) {
         query = { chatId: { $in: user.researchSessions } };
       } else {
@@ -598,13 +545,16 @@ export const getAllSessions = async (req, res) => {
       }
     }
 
+    // Only select fields needed for list view to improve performance
     const sessions = await ResearchSession.find(query)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select('-phases.phase1.n8nResponse'); // Exclude large response data
+      .select('chatId originalInput overallStatus currentPhase progress createdAt')
+      .lean() // Return plain JS objects instead of Mongoose documents (faster)
+      .maxTimeMS(10000); // 10 second timeout
 
-    const total = await ResearchSession.countDocuments(query);
+    const total = await ResearchSession.countDocuments(query).maxTimeMS(5000);
 
     res.status(200).json({
       success: true,
@@ -621,7 +571,17 @@ export const getAllSessions = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching sessions:', error);
+    // console.error('Error fetching sessions:', error);
+    
+    // Handle specific MongoDB errors
+    if (error.name === 'MongoNetworkTimeoutError' || error.name === 'MongoTimeoutError') {
+      return res.status(503).json({
+        success: false,
+        error: 'Database connection timeout',
+        details: 'Unable to reach database. Please check your network connection.'
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: 'Failed to fetch sessions',
@@ -635,10 +595,81 @@ export const stopPhase = async (req, res) => {
     const { chatId } = req.params;
     const { phase } = req.body;
 
+    // console.log(`🛑 Stop phase request - chatId: ${chatId}, phase: ${phase}`);
+
     if (!phase || phase < 1 || phase > 6) {
+      // console.log(`❌ Invalid phase number: ${phase}`);
       return res.status(400).json({
         success: false,
         error: 'Invalid phase number. Must be between 1 and 6'
+      });
+    }
+
+    const session = await ResearchSession.findOne({ chatId });
+    
+    if (!session) {
+      // console.log(`❌ Session not found: ${chatId}`);
+      return res.status(404).json({
+        success: false,
+        error: 'Research session not found'
+      });
+    }
+
+    const phaseKey = `phase${phase}`;
+    const currentStatus = session.phases[phaseKey]?.status;
+
+    // console.log(`📊 Current phase ${phase} status: ${currentStatus}`);
+
+    // Only allow stopping phases that are in 'processing' state
+    if (currentStatus !== 'processing') {
+      // console.log(`⚠️ Cannot stop phase ${phase} - not in processing state (current: ${currentStatus})`);
+      return res.status(400).json({
+        success: false,
+        error: `Phase ${phase} is not currently processing (status: ${currentStatus})`
+      });
+    }
+
+    // Mark phase as pending (not completed)
+    session.phases[phaseKey].status = 'pending';
+    session.phases[phaseKey].error = null;
+    session.phases[phaseKey].completedAt = null;
+
+    await session.save();
+
+    // console.log(`✅ Phase ${phase} stopped successfully - status set to pending`);
+
+    res.status(200).json({
+      success: true,
+      message: `Phase ${phase} stopped successfully`,
+      data: {
+        chatId,
+        phase,
+        newStatus: 'pending'
+      }
+    });
+
+  } catch (error) {
+    // console.error('Error stopping phase:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to stop phase',
+      details: error.message
+    });
+  }
+};
+
+/**
+ * Submit expected outcome after Phase 5 and trigger Phase 6
+ */
+export const submitExpectedOutcome = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { expectedOutcome } = req.body;
+
+    if (!expectedOutcome || expectedOutcome.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Expected outcome is required'
       });
     }
 
@@ -651,43 +682,92 @@ export const stopPhase = async (req, res) => {
       });
     }
 
-    const phaseKey = `phase${phase}`;
-    const currentStatus = session.phases[phaseKey]?.status;
-
-    // Only allow stopping phases that are in 'processing' state
-    if (currentStatus !== 'processing') {
+    // Verify Phase 5 is completed
+    if (session.phases.phase5.status !== 'completed') {
       return res.status(400).json({
         success: false,
-        error: `Phase ${phase} is not currently processing (status: ${currentStatus})`
+        error: 'Phase 5 must be completed before submitting expected outcome'
       });
     }
 
-    // Mark phase as failed
-    session.phases[phaseKey].status = 'failed';
-    session.phases[phaseKey].error = 'Phase manually stopped by user';
-    session.phases[phaseKey].completedAt = new Date();
-
+    // Store expected outcome
+    session.expectedOutcome = expectedOutcome.trim();
     await session.save();
+
+    // console.log(`✅ Expected outcome received for chatId: ${chatId}`);
+    // console.log(`📝 Expected outcome: ${expectedOutcome}`);
+
+    // Trigger Phase 6 with expected outcome
+    triggerPhase6(chatId, session.refinedProblem, expectedOutcome);
 
     res.status(200).json({
       success: true,
-      message: `Phase ${phase} stopped successfully`,
+      message: 'Expected outcome submitted successfully. Phase 6 will start shortly.',
       data: {
         chatId,
-        phase,
-        newStatus: 'failed'
+        expectedOutcome
       }
     });
 
   } catch (error) {
-    console.error('Error stopping phase:', error);
+    // console.error('Error submitting expected outcome:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to stop phase',
+      error: 'Failed to submit expected outcome',
       details: error.message
     });
   }
 };
+
+// Update expected outcome without triggering Phase 6 (for retries)
+export const updateExpectedOutcome = async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { expectedOutcome } = req.body;
+
+    if (!expectedOutcome || expectedOutcome.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Expected outcome is required'
+      });
+    }
+
+    const session = await ResearchSession.findOne({ chatId });
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Research session not found'
+      });
+    }
+
+    // Store expected outcome
+    session.expectedOutcome = expectedOutcome.trim();
+    await session.save();
+
+    // console.log(`✅ Expected outcome updated for chatId: ${chatId}`);
+    // console.log(`📝 Expected outcome: ${expectedOutcome}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Expected outcome updated successfully.',
+      data: {
+        chatId,
+        expectedOutcome
+      }
+    });
+
+  } catch (error) {
+    // console.error('Error updating expected outcome:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update expected outcome',
+      details: error.message
+    });
+  }
+};
+
+// ============= WEBHOOK N8N TRIGGER FUNCTIONS ============
 
 export const deleteSession = async (req, res) => {
   try {
@@ -714,7 +794,7 @@ export const deleteSession = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error deleting session:', error);
+    // console.error('Error deleting session:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to delete session',
@@ -728,14 +808,13 @@ export const deleteSession = async (req, res) => {
  * @param {string} chatId - Unique chat identifier
  * @param {string} refinedProblem - Refined problem from Phase 1
  * @param {Array} subtopics - Subtopics from Phase 1
- * @param {Array} embedding - Problem embedding vector from Phase 1
  */
-const triggerPhase2 = async (chatId, refinedProblem, subtopics, embedding) => {
+const triggerPhase2 = async (chatId, refinedProblem, subtopics) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
     if (!session) {
-      console.error(`Session not found for chatId: ${chatId}`);
+      // console.error(`Session not found for chatId: ${chatId}`);
       return;
     }
 
@@ -743,7 +822,7 @@ const triggerPhase2 = async (chatId, refinedProblem, subtopics, embedding) => {
     if (session.phases.phase2.status === 'completed') {
       const hasValidData = session.papers && session.papers.length > 0 && session.papers.some(p => p.pdfLink);
       if (hasValidData) {
-        console.log(`⏭️ Phase 2 already completed for chatId: ${chatId}, skipping...`);
+        // console.log(`⏭️ Phase 2 already completed for chatId: ${chatId}, skipping...`);
         // Trigger Phase 3 if not completed
         if (session.phases.phase3.status !== 'completed') {
           const pdfLinks = session.papers.map(p => p.pdfLink).filter(link => link);
@@ -763,336 +842,522 @@ const triggerPhase2 = async (chatId, refinedProblem, subtopics, embedding) => {
     
     await session.save();
 
-    // Send to Phase 2 n8n webhook
-    sendToPhase2Webhook(chatId, refinedProblem, subtopics, embedding)
-      .then(async (phase2Response) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+    // Send 3 parallel requests to Phase 2 webhooks
+    // console.log(`\u{1F680} Starting Phase 2 parallel requests for chatId: ${chatId}`);
+    
+    // Create promises for all 3 requests (embeddings not passed to save bandwidth)
+    const papersPromise = sendToPhase2Webhook(chatId, refinedProblem, subtopics)
+      .then(response => ({ type: 'papers', success: true, data: response }))
+      .catch(error => ({ type: 'papers', success: false, error: error.message }));
+    
+    const applicationsPromise = sendToPhase2ApplicationsWebhook(chatId, refinedProblem)
+      .then(response => ({ type: 'applications', success: true, data: response }))
+      .catch(error => ({ type: 'applications', success: false, error: error.message }));
+    
+    const githubPromise = sendToPhase2GitHubWebhook(chatId, refinedProblem)
+      .then(response => ({ type: 'github', success: true, data: response }))
+      .catch(error => ({ type: 'github', success: false, error: error.message }));
+
+    // Mark all as sent
+    const updatedSession = await ResearchSession.findOne({ chatId });
+    updatedSession.phases.phase2.papers.sent = true;
+    updatedSession.phases.phase2.applications.sent = true;
+    updatedSession.phases.phase2.github.sent = true;
+    await updatedSession.save();
+
+    // Wait for all 3 requests to complete
+    Promise.allSettled([papersPromise, applicationsPromise, githubPromise])
+      .then(async (results) => {
+        const session = await ResearchSession.findOne({ chatId });
         
-        // Parse and store papers data from Phase 2
-        // phase2Data is already an array of paper objects from n8n
-        const papers = phase2Response.phase2Data || [];
-        const formattedPapers = Array.isArray(papers) ? papers.map(paper => {
-          // Handle authors as string or array
-          let authorsArray = [];
-          if (Array.isArray(paper.authors)) {
-            authorsArray = paper.authors;
-          } else if (typeof paper.authors === 'string') {
-            authorsArray = paper.authors.split(',').map(a => a.trim()).filter(a => a);
+        let hasErrors = false;
+        let hasPapers = false;
+        
+        // Process each result
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            const { type, success, data, error } = result.value;
+            
+            if (success) {
+              // Handle papers response
+              if (type === 'papers') {
+                const papers = data.phase2Data || [];
+                const formattedPapers = Array.isArray(papers) ? papers.map(paper => {
+                  let authorsArray = [];
+                  if (Array.isArray(paper.authors)) {
+                    authorsArray = paper.authors;
+                  } else if (typeof paper.authors === 'string') {
+                    authorsArray = paper.authors.split(',').map(a => a.trim()).filter(a => a);
+                  }
+                  
+                  return {
+                    title: paper.title || '',
+                    authors: authorsArray,
+                    abstract: cleanAbstract(paper.abstract || ''),
+                    pdfLink: paper.pdf_url || '',
+                    semanticScore: paper.semantic_score || 0,
+                    semanticScorePercent: Math.round(paper.semantic_score * 100) || null,
+                    year: paper.year || null
+                  };
+                }) : [];
+                
+                session.papers = formattedPapers;
+                session.phases.phase2.papers.completed = true;
+                session.phases.phase2.papers.response = data;
+                session.phases.phase2.papers.data = formattedPapers;
+                
+                if (formattedPapers.length > 0) {
+                  hasPapers = true;
+                }
+              }
+              
+              // Handle applications response
+              else if (type === 'applications') {
+                const applicationsData = data.applicationsData;
+                let solutions = [];
+                let notes = '';
+                
+                if (Array.isArray(applicationsData) && applicationsData.length > 0) {
+                  solutions = applicationsData[0]?.solutions || [];
+                  notes = applicationsData[0]?.notes || '';
+                } else if (applicationsData && applicationsData.solutions) {
+                  solutions = applicationsData.solutions || [];
+                  notes = applicationsData.notes || '';
+                }
+                
+                if (solutions && solutions.length > 0) {
+                  session.applications = solutions.map(sol => ({
+                    title: sol.title || '',
+                    summary: sol.summary || '',
+                    features: Array.isArray(sol.features) ? sol.features : [],
+                    limitations: Array.isArray(sol.limitations) ? sol.limitations : [sol.limitations || ''],
+                    targetUsers: sol.target_users || '',
+                    platformType: sol.platform_type || '',
+                    officialWebsite: sol.official_website || '',
+                    documentationLink: sol.documentation_link || '',
+                    pricingOrLicense: sol.pricing_or_license || ''
+                  }));
+                  
+                  session.applicationsNotes = notes;
+                }
+                
+                session.phases.phase2.applications.completed = true;
+                session.phases.phase2.applications.response = data;
+                session.phases.phase2.applications.data = applicationsData;
+              }
+              
+              // Handle GitHub response
+              else if (type === 'github') {
+                const githubData = data.githubData;
+                
+                if (Array.isArray(githubData) && githubData.length > 0) {
+                  // Store complete GitHub API response data
+                  session.githubProjects = githubData;
+                }
+                
+                session.phases.phase2.github.completed = true;
+                session.phases.phase2.github.response = data;
+                session.phases.phase2.github.data = githubData;
+              }
+            } else {
+              // Handle errors
+              hasErrors = true;
+              if (type === 'papers') {
+                session.phases.phase2.papers.error = error;
+                // console.error(`\u{274C} Phase 2 Papers failed: ${error}`);
+              } else if (type === 'applications') {
+                session.phases.phase2.applications.error = error;
+                // console.error(`\u{274C} Phase 2 Applications failed: ${error}`);
+              } else if (type === 'github') {
+                session.phases.phase2.github.error = error;
+                // console.error(`\u{274C} Phase 2 GitHub failed: ${error}`);
+              }
+            }
           }
-          
-          return {
-            title: paper.title || '',
-            authors: authorsArray,
-            abstract: cleanAbstract(paper.abstract || ''),
-            pdfLink: paper.pdf_url || '',
-            semanticScore: paper.semantic_score || 0,
-            semanticScorePercent: Math.round(paper.semantic_score * 100) || null,
-            year: paper.year || null
-          };
-        }) : [];
-        
-        // Store papers immediately for Phase 2 table display
-        updatedSession.papers = formattedPapers;
-        updatedSession.phases.phase2.n8nWebhookSent = true;
-        updatedSession.phases.phase2.n8nResponse = phase2Response;
-        updatedSession.phases.phase2.phase2Data = formattedPapers; // Store for Phase 3 matching
-        
-        // Automatically trigger Phase 3 with PDF links
-        const pdfLinks = formattedPapers.map(p => p.pdfLink).filter(link => link);
-        if (pdfLinks.length > 0) {
-          updatedSession.phases.phase2.status = 'completed';
-          updatedSession.phases.phase2.completedAt = new Date();
-          updatedSession.progress = 25;
-          await updatedSession.save();
-          
-          triggerPhase3(chatId, pdfLinks);
-        } else {
-          // No papers found - mark Phase 2 as failed
-          updatedSession.phases.phase2.status = 'failed';
-          updatedSession.phases.phase2.completedAt = new Date();
-          updatedSession.phases.phase2.error = 'No papers found with valid PDF links';
-          updatedSession.progress = 25;
-          await updatedSession.save();
-          
-          console.error(`❌ Phase 2 completed but no papers found for chatId: ${chatId}`);
         }
+        
+        // Update overall Phase 2 status
+        const papersCompleted = session.phases.phase2.papers.completed;
+        const appsCompleted = session.phases.phase2.applications.completed;
+        const githubCompleted = session.phases.phase2.github.completed;
+        
+        // Mark Phase 2 as completed if all 3 requests are done (even if some failed)
+        if (papersCompleted && appsCompleted && githubCompleted) {
+          session.phases.phase2.status = 'completed';
+          session.phases.phase2.completedAt = new Date();
+          session.progress = 45;
+          
+          // console.log(`✅ Phase 2 completed for chatId: ${chatId} - Triggering Phase 3`);
+          await session.save();
+          
+          // Trigger Phase 3 (parallel analysis of papers and GitHub projects)
+          triggerPhase3(chatId, []);
+          return;
+        } else {
+          // At least one request is still pending - shouldn't happen with allSettled
+          // console.log('🔄 Phase 2 still processing...');
+        }
+        
+        await session.save();
       })
       .catch(async (error) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+        const session = await ResearchSession.findOne({ chatId });
         
-        updatedSession.phases.phase2.status = 'failed';
-        updatedSession.phases.phase2.completedAt = new Date();
-        updatedSession.phases.phase2.error = error.message;
+        session.phases.phase2.status = 'failed';
+        session.phases.phase2.completedAt = new Date();
+        session.phases.phase2.error = error.message;
         
-        await updatedSession.save();
+        await session.save();
         
-        console.error(`❌ Phase 2 failed for chatId: ${chatId}`, error.message);
+        // console.error(`\u{274C} Phase 2 failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase2:', error);
+    // console.error('Error in triggerPhase2:', error);
   }
 };
 
 /**
- * Trigger Phase 3 processing
+ * Trigger Phase 3 processing with 2 parallel analysis webhooks
  * @param {string} chatId - Unique chat identifier
- * @param {Array} pdfLinks - PDF links from Phase 2
+ * @param {Array} pdfLinks - PDF links from Phase 2 (not used in new Phase 3, keeping for compatibility)
  */
 const triggerPhase3 = async (chatId, pdfLinks) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
     if (!session) {
-      console.error(`Session not found for chatId: ${chatId}`);
+      // console.error(`Session not found for chatId: ${chatId}`);
       return;
     }
 
-    // Check if Phase 3 is already completed with valid data
+    // Check if Phase 3 is already completed
     if (session.phases.phase3.status === 'completed') {
-      const hasValidData = session.papers && session.papers.length > 0 && session.papers.some(p => p.summary && p.methodology);
-      if (hasValidData) {
-        console.log(`⏭️ Phase 3 already completed for chatId: ${chatId}, skipping...`);
-        // Trigger Phase 4 if not completed
-        if (session.phases.phase4.status !== 'completed' && session.refinedProblem) {
-          triggerPhase4(chatId, session.refinedProblem);
-        }
-        return;
+      // console.log(`⏭️ Phase 3 already completed for chatId: ${chatId}, skipping...`);
+      // Trigger Phase 4 (Gap Finder) if not completed
+      if (session.phases.phase4.status !== 'completed' && session.refinedProblem) {
+        triggerPhase4(chatId, session.refinedProblem);
       }
+      return;
     }
 
     // Update Phase 3 status to processing
     session.phases.phase3.status = 'processing';
     session.phases.phase3.startedAt = new Date();
     session.currentPhase = 3;
-    session.progress = 40;
+    session.progress = 45;
     
     await session.save();
 
-    console.log(`🔄 Phase 3 started for chatId: ${chatId} with ${pdfLinks.length} PDF links`);
+    // console.log(`🚀 Starting Phase 3 parallel analysis for chatId: ${chatId}`);
 
-    // Send to Phase 3 n8n webhook
-    sendToPhase3Webhook(chatId, pdfLinks)
-      .then(async (phase3Response) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+    // Get data from Phase 2
+    const papers = session.papers || [];
+    const githubProjects = session.githubProjects || [];
+
+    // Split papers into chunks of maximum 3 papers each
+    const MAX_PAPERS_PER_CHUNK = 3;
+    const paperChunks = [];
+    for (let i = 0; i < papers.length; i += MAX_PAPERS_PER_CHUNK) {
+      paperChunks.push(papers.slice(i, i + MAX_PAPERS_PER_CHUNK));
+    }
+    
+    // Split GitHub projects into chunks using 4-3-3 pattern
+    const githubChunks = [];
+    if (githubProjects.length > 0) {
+      const firstChunkSize = Math.min(4, githubProjects.length);
+      githubChunks.push(githubProjects.slice(0, firstChunkSize));
+      
+      if (githubProjects.length > firstChunkSize) {
+        const remainingProjects = githubProjects.slice(firstChunkSize);
+        const secondChunkSize = Math.min(3, remainingProjects.length);
+        githubChunks.push(remainingProjects.slice(0, secondChunkSize));
         
-        // Parse Phase 3 data - handle both array and object responses
-        let phase3Papers = [];
-        if (Array.isArray(phase3Response)) {
-          // n8n sent array directly
-          phase3Papers = phase3Response;
-        } else if (phase3Response.phase3Data) {
-          // n8n sent object with phase3Data property
-          phase3Papers = phase3Response.phase3Data;
+        if (remainingProjects.length > secondChunkSize) {
+          githubChunks.push(remainingProjects.slice(secondChunkSize));
         }
+      }
+    }
+
+    // console.log(`📚 Splitting ${papers.length} papers into ${paperChunks.length} chunks:`, paperChunks.map(c => c.length));
+    // console.log(`🔧 Splitting ${githubProjects.length} GitHub projects into ${githubChunks.length} chunks:`, githubChunks.map(c => c.length));
+
+    // Get refined problem from session
+    const refinedProblem = session.refinedProblem || '';
+
+    // Create promises for all paper analysis webhooks
+    const paperAnalysisPromises = paperChunks.map((chunk, index) => 
+      sendToPhase3ResearchPaperWebhook(chatId, chunk, index + 1, paperChunks.length, refinedProblem)
+        .then(response => ({ type: 'paperAnalysis', chunk: index + 1, success: true, data: response }))
+        .catch(error => ({ type: 'paperAnalysis', chunk: index + 1, success: false, error: error.message }))
+    );
+    
+    // Create promises for all GitHub analysis webhooks
+    const githubAnalysisPromises = githubChunks.map((chunk, index) =>
+      sendToPhase3GitHubWebhook(chatId, chunk, index + 1, githubChunks.length, refinedProblem)
+        .then(response => ({ type: 'githubAnalysis', chunk: index + 1, success: true, data: response }))
+        .catch(error => ({ type: 'githubAnalysis', chunk: index + 1, success: false, error: error.message }))
+    );
+
+    // Combine all promises
+    const allPromises = [...paperAnalysisPromises, ...githubAnalysisPromises];
+
+    // Mark both as sent
+    const updatedSession = await ResearchSession.findOne({ chatId });
+    updatedSession.phases.phase3.researchPaperAnalysis.sent = true;
+    updatedSession.phases.phase3.githubAnalysis.sent = true;
+    await updatedSession.save();
+
+    // Wait for all analyses to complete
+    Promise.allSettled(allPromises)
+      .then(async (results) => {
+        const session = await ResearchSession.findOne({ chatId });
         
-        // Only keep papers that have Phase 3 analysis (summary and methodology)
-        const enrichedPapers = [];
+        let hasErrors = false;
+        let combinedPaperAnalysis = [];
+        let combinedGithubAnalysis = [];
+        let paperChunksCompleted = 0;
+        let githubChunksCompleted = 0;
+        let paperErrors = [];
+        let githubErrors = [];
         
-        if (Array.isArray(phase3Papers) && phase3Papers.length > 0) {
-          // Get Phase 2 papers from temporary storage
-          const phase2Papers = updatedSession.phases.phase2.phase2Data || [];
-          
-          phase3Papers.forEach(p3 => {
-            // Only include if has summary AND methodology
-            if (p3.summary && p3.methodology) {
-              // Find matching Phase 2 paper for additional data
-              const phase2Match = phase2Papers.find(p2 => 
-                p3.pdf_link === p2.pdfLink || 
-                p3.pdf_link?.includes(p2.pdfLink) || 
-                p2.pdfLink?.includes(p3.pdf_link)
-              );
+        // Count total expected chunks
+        const totalPaperChunks = paperChunks.length;
+        const totalGithubChunks = githubChunks.length;
+        
+        // Process each result
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            const { type, chunk, success, data, error } = result.value;
+            
+            if (success) {
+              // Handle paper analysis response
+              if (type === 'paperAnalysis') {
+                const analysisData = data.paperAnalysisData || [];
+                
+                // Combine paper analysis data from all chunks
+                if (Array.isArray(analysisData)) {
+                  combinedPaperAnalysis = combinedPaperAnalysis.concat(analysisData);
+                }
+                
+                paperChunksCompleted++;
+                // console.log(`✅ Phase 3 Research Paper Analysis Chunk ${chunk}/${totalPaperChunks} completed (${analysisData.length} papers)`);
+                
+                // Mark as completed when all chunks are done
+                if (paperChunksCompleted === totalPaperChunks) {
+                  session.phases.phase3.researchPaperAnalysis.completed = true;
+                  session.phases.phase3.researchPaperAnalysis.response = { 
+                    combined: true, 
+                    totalPapers: combinedPaperAnalysis.length,
+                    chunks: totalPaperChunks
+                  };
+                  session.phases.phase3.researchPaperAnalysis.data = combinedPaperAnalysis;
+                  
+                  // console.log(`✅ Phase 3 Research Paper Analysis FULLY completed (${combinedPaperAnalysis.length} total papers from ${totalPaperChunks} chunks)`);
+                }
+              }
               
-              if (phase2Match) {
-                enrichedPapers.push({
-                  title: p3.title || phase2Match.title,
-                  authors: phase2Match.authors,
-                  abstract: phase2Match.abstract,
-                  pdfLink: p3.pdf_link,
-                  semanticScore: phase2Match.semanticScore,
-                  semanticScorePercent: phase2Match.semanticScorePercent,
-                  year: p3.year || phase2Match.year,
-                  summary: p3.summary,
-                  methodology: p3.methodology,
-                  algorithmsUsed: p3.algorithms_used || [],
-                  result: p3.result || '',
-                  conclusion: p3.conclusion || '',
-                  limitations: p3.limitations || 'Not mentioned',
-                  futureScope: p3.future_scope || 'Not mentioned'
-                });
+              // Handle GitHub analysis response
+              else if (type === 'githubAnalysis') {
+                const analysisData = data.githubAnalysisData || [];
+                
+                // Combine GitHub analysis data from all chunks
+                if (Array.isArray(analysisData)) {
+                  combinedGithubAnalysis = combinedGithubAnalysis.concat(analysisData);
+                }
+                
+                githubChunksCompleted++;
+                // console.log(`✅ Phase 3 GitHub Analysis Chunk ${chunk}/${totalGithubChunks} completed (${analysisData.length} projects)`);
+                
+                // Mark as completed when all chunks are done
+                if (githubChunksCompleted === totalGithubChunks) {
+                  session.phases.phase3.githubAnalysis.completed = true;
+                  session.phases.phase3.githubAnalysis.response = {
+                    combined: true,
+                    totalProjects: combinedGithubAnalysis.length,
+                    chunks: totalGithubChunks
+                  };
+                  session.phases.phase3.githubAnalysis.data = combinedGithubAnalysis;
+                  
+                  // console.log(`✅ Phase 3 GitHub Analysis FULLY completed (${combinedGithubAnalysis.length} total projects from ${totalGithubChunks} chunks)`);
+                }
+              }
+            } else {
+              // Handle errors
+              hasErrors = true;
+              if (type === 'paperAnalysis') {
+                paperErrors.push(`Chunk ${chunk}: ${error}`);
+                // console.error(`❌ Phase 3 Research Paper Analysis Chunk ${chunk} failed: ${error}`);
+                
+                paperChunksCompleted++;
+                // If all chunks processed and no data, mark as failed with errors
+                if (paperChunksCompleted === totalPaperChunks) {
+                  session.phases.phase3.researchPaperAnalysis.completed = true;
+                  if (combinedPaperAnalysis.length === 0) {
+                    session.phases.phase3.researchPaperAnalysis.error = paperErrors.join('; ');
+                  } else {
+                    session.phases.phase3.researchPaperAnalysis.response = { 
+                      combined: true, 
+                      totalPapers: combinedPaperAnalysis.length,
+                      chunks: totalPaperChunks,
+                      partialErrors: paperErrors
+                    };
+                    session.phases.phase3.researchPaperAnalysis.data = combinedPaperAnalysis;
+                  }
+                }
+              } else if (type === 'githubAnalysis') {
+                githubErrors.push(`Chunk ${chunk}: ${error}`);
+                // console.error(`❌ Phase 3 GitHub Analysis Chunk ${chunk} failed: ${error}`);
+                
+                githubChunksCompleted++;
+                // If all chunks processed and no data, mark as failed with errors
+                if (githubChunksCompleted === totalGithubChunks) {
+                  session.phases.phase3.githubAnalysis.completed = true;
+                  if (combinedGithubAnalysis.length === 0) {
+                    session.phases.phase3.githubAnalysis.error = githubErrors.join('; ');
+                  } else {
+                    session.phases.phase3.githubAnalysis.response = {
+                      combined: true,
+                      totalProjects: combinedGithubAnalysis.length,
+                      chunks: totalGithubChunks,
+                      partialErrors: githubErrors
+                    };
+                    session.phases.phase3.githubAnalysis.data = combinedGithubAnalysis;
+                  }
+                }
               }
             }
-          });
-          
-          updatedSession.papers = enrichedPapers;
-        }
-        
-        updatedSession.phases.phase3.n8nWebhookSent = true;
-        updatedSession.phases.phase3.n8nResponse = phase3Response;
-        updatedSession.phases.phase3.phase3Data = phase3Papers;
-        
-        // Check if we got enriched papers
-        if (enrichedPapers.length > 0) {
-          updatedSession.phases.phase3.status = 'completed';
-          updatedSession.phases.phase3.completedAt = new Date();
-          updatedSession.progress = 55;
-          await updatedSession.save();
-          
-          // Automatically trigger Phase 4 with chatId and refined problem
-          const refinedProblem = updatedSession.refinedProblem;
-          if (refinedProblem) {
-            triggerPhase4(chatId, refinedProblem);
           }
-        } else {
-          // No enriched papers - mark Phase 3 as failed
-          updatedSession.phases.phase3.status = 'failed';
-          updatedSession.phases.phase3.completedAt = new Date();
-          updatedSession.phases.phase3.error = 'No papers were enriched with analysis data from n8n';
-          updatedSession.progress = 40;
-          await updatedSession.save();
-          
-          console.error(`❌ Phase 3 webhook responded but no enriched papers for chatId: ${chatId}`);
         }
+        
+        // Update overall Phase 3 status
+        const paperAnalysisCompleted = session.phases.phase3.researchPaperAnalysis.completed;
+        const githubAnalysisCompleted = session.phases.phase3.githubAnalysis.completed;
+        
+        // console.log(`📊 Phase 3 Status Check for ${chatId}:`, { paperAnalysisCompleted, githubAnalysisCompleted, bothComplete: paperAnalysisCompleted && githubAnalysisCompleted });
+        
+        // Mark Phase 3 as completed if both analyses are done (even if some failed)
+        if (paperAnalysisCompleted && githubAnalysisCompleted) {
+          session.phases.phase3.status = 'completed';
+          session.phases.phase3.completedAt = new Date();
+          session.progress = 85;
+          
+          // console.log(`✅ Phase 3 completed for ${chatId}`, { paperCompleted: session.phases.phase3.researchPaperAnalysis.completed, githubCompleted: session.phases.phase3.githubAnalysis.completed });
+          
+          // Trigger Phase 4 (Gap Finder)
+          await session.save();
+          if (session.refinedProblem) {
+            triggerPhase4(chatId, session.refinedProblem);
+          }
+          return;
+        } else {
+          // At least one analysis is still pending
+          // console.log('🔄 Phase 3 still processing...');
+        }
+        
+        await session.save();
       })
       .catch(async (error) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+        const session = await ResearchSession.findOne({ chatId });
         
-        updatedSession.phases.phase3.status = 'failed';
-        updatedSession.phases.phase3.completedAt = new Date();
-        updatedSession.phases.phase3.error = error.message;
+        session.phases.phase3.status = 'failed';
+        session.phases.phase3.completedAt = new Date();
+        session.phases.phase3.error = error.message;
         
-        await updatedSession.save();
+        await session.save();
         
-        console.error(`❌ Phase 3 failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 3 failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase3:', error);
+    // console.error('Error in triggerPhase3:', error);
   }
 };
 
 /**
- * Trigger Phase 4: Send chatId and refined problem to n8n webhook
+ * Trigger Phase 4: Parallel analysis of research papers, GitHub projects, and applications
  * @param {string} chatId - Research session ID
  * @param {string} refinedProblem - Refined problem statement
+ */
+/**
+ * Trigger Phase 4: Gap Finder - Analyze research gaps and opportunities
  */
 const triggerPhase4 = async (chatId, refinedProblem) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
     if (!session) {
-      console.error(`Session not found for chatId: ${chatId}`);
+      // console.error(`Session not found for chatId: ${chatId}`);
       return;
     }
 
     // Check if Phase 4 is already completed with valid data
     if (session.phases.phase4.status === 'completed') {
-      const hasValidData = session.phase4Analysis && (
-        (session.phase4Analysis.mostCommonMethodologies?.length > 0) ||
-        (session.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
-        (session.phase4Analysis.datasetsUsed?.length > 0) ||
-        (session.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
-      );
+      const hasValidData = session.phase4GapAnalysis && 
+                          (session.phase4GapAnalysis.evidence_based_gaps || 
+                           session.phase4GapAnalysis.research_gaps_from_papers ||
+                           session.phase4GapAnalysis.ai_predicted_possible_gaps);
       if (hasValidData) {
-        console.log(`⏭️ Phase 4 already completed for chatId: ${chatId}, skipping...`);
-        // Trigger Phase 5 if not completed
-        if (session.phases.phase5.status !== 'completed' && refinedProblem) {
-          triggerPhase5(chatId, refinedProblem);
+        // console.log(`⏭️ Phase 4 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 6 (Best Solution) if not completed
+        if (session.phases.phase6.status !== 'completed' && session.refinedProblem) {
+          triggerPhase6(chatId, session.refinedProblem);
         }
         return;
       }
     }
-
-    // Update Phase 4 status to processing
+    
     session.phases.phase4.status = 'processing';
     session.phases.phase4.startedAt = new Date();
     session.currentPhase = 4;
-    session.progress = 60;
+    session.progress = 75;
     
     await session.save();
 
-    // Send to Phase 4 n8n webhook
-    sendToPhase4Webhook(chatId, refinedProblem)
+    // console.log(`🔍 Starting Phase 4 Gap Finder for chatId: ${chatId}`);
+
+    sendToPhase4GapFinderWebhook(chatId, refinedProblem)
       .then(async (phase4Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
-        // Parse Phase 4 response - phase4Data is the direct response object, not an array
+        // Parse Phase 4 response
         const phase4Data = phase4Response.phase4Data;
         
-        console.log('📥 Phase 4 Response:', {
-          isArray: Array.isArray(phase4Data),
-          hasPhase4Data: !!phase4Data,
-          dataType: typeof phase4Data,
-          keys: phase4Data ? Object.keys(phase4Data) : []
-        });
+        // console.log('📊 Phase 4 Raw Data:', JSON.stringify(phase4Data, null, 2));
         
-        // Handle both array and direct object response
-        let cleanedOutput;
+        let gapAnalysis;
         if (Array.isArray(phase4Data) && phase4Data.length > 0) {
-          cleanedOutput = phase4Data[0]?.cleanedOutput;
-        } else if (phase4Data && phase4Data.cleanedOutput) {
-          // Direct object response
-          cleanedOutput = phase4Data.cleanedOutput;
-        }
-          
-        if (cleanedOutput) {
-          // Direct assignment to nested properties
-          if (!updatedSession.phase4Analysis) {
-            updatedSession.phase4Analysis = {};
-          }
-          
-          updatedSession.phase4Analysis.mostCommonMethodologies = cleanedOutput.most_common_methodologies || [];
-          updatedSession.phase4Analysis.technologyOrAlgorithms = cleanedOutput.technology_or_algorithms || [];
-          updatedSession.phase4Analysis.datasetsUsed = cleanedOutput.datasets_used || [];
-          updatedSession.phase4Analysis.uniqueOrLessCommonApproaches = cleanedOutput.unique_or_less_common_approaches || [];
-          
-          // Mark as modified for Mongoose
-          updatedSession.markModified('phase4Analysis');
-          
-          console.log('✅ Phase 4 Analysis stored:', {
-            methodologies: updatedSession.phase4Analysis.mostCommonMethodologies?.length || 0,
-            technologies: updatedSession.phase4Analysis.technologyOrAlgorithms?.length || 0,
-            datasets: updatedSession.phase4Analysis.datasetsUsed?.length || 0,
-            uniqueApproaches: updatedSession.phase4Analysis.uniqueOrLessCommonApproaches?.length || 0
-          });
+          gapAnalysis = phase4Data[0];
+        } else if (phase4Data && typeof phase4Data === 'object') {
+          gapAnalysis = phase4Data;
+        } else {
+          gapAnalysis = null;
         }
         
-        updatedSession.phases.phase4.n8nWebhookSent = true;
-        updatedSession.phases.phase4.n8nResponse = phase4Response;
-        updatedSession.phases.phase4.phase4Data = phase4Response.phase4Data;
-        
-        // CRITICAL VALIDATION: Check phase4Analysis in database (not just cleanedOutput)
-        // This ensures phase4Analysis was actually populated, not just received a response
-        const hasValidAnalysisData = updatedSession.phase4Analysis && (
-          (updatedSession.phase4Analysis.mostCommonMethodologies?.length > 0) ||
-          (updatedSession.phase4Analysis.technologyOrAlgorithms?.length > 0) ||
-          (updatedSession.phase4Analysis.datasetsUsed?.length > 0) ||
-          (updatedSession.phase4Analysis.uniqueOrLessCommonApproaches?.length > 0)
-        );
-        
-        if (hasValidAnalysisData) {
+        if (gapAnalysis) {
+          // Store gap analysis data with the actual structure from webhook
+          updatedSession.phase4GapAnalysis = {
+            evidence_based_gaps: gapAnalysis.evidence_based_gaps || [],
+            research_gaps_from_papers: gapAnalysis.research_gaps_from_papers || [],
+            ai_predicted_possible_gaps: gapAnalysis.ai_predicted_possible_gaps || [],
+            confidence_level: gapAnalysis.confidence_level || 'MEDIUM',
+            note: gapAnalysis.note || ''
+          };
+          
           updatedSession.phases.phase4.status = 'completed';
           updatedSession.phases.phase4.completedAt = new Date();
-          updatedSession.progress = 70;
+          updatedSession.phases.phase4.n8nResponse = phase4Response;
+          updatedSession.progress = 80;
+          
           await updatedSession.save();
           
-          console.log(`✅ Phase 4 completed successfully for chatId: ${chatId}`);
+          // console.log(`✅ Phase 4 completed successfully for chatId: ${chatId}`);
+          // console.log(`📊 Stored ${gapAnalysis.evidence_based_gaps?.length || 0} evidence-based gaps, ${gapAnalysis.research_gaps_from_papers?.length || 0} research gaps from papers, and ${gapAnalysis.ai_predicted_possible_gaps?.length || 0} AI-predicted gaps`);
           
-          // Automatically trigger Phase 5 after Phase 4 completion
-          triggerPhase5(chatId, refinedProblem);
+          // Trigger Phase 5 (Literature Review)
+          triggerPhase5(chatId, updatedSession.refinedProblem);
         } else {
-          // No analysis data in phase4Analysis - mark Phase 4 as failed
-          updatedSession.phases.phase4.status = 'failed';
-          updatedSession.phases.phase4.completedAt = new Date();
-          updatedSession.phases.phase4.error = 'Phase 4 completed but phase4Analysis is empty. Data parsing or structure mismatch detected.';
-          updatedSession.progress = 60;
-          await updatedSession.save();
-          
-          console.error(`❌ Phase 4 webhook responded but phase4Analysis is empty for chatId: ${chatId}`, {
-            hadCleanedOutput: !!cleanedOutput,
-            phase4DataKeys: phase4Response.phase4Data ? Object.keys(phase4Response.phase4Data) : [],
-            phase4AnalysisState: updatedSession.phase4Analysis
-          });
+          throw new Error('Phase 4 returned invalid or empty data');
         }
       })
       .catch(async (error) => {
@@ -1101,121 +1366,73 @@ const triggerPhase4 = async (chatId, refinedProblem) => {
         updatedSession.phases.phase4.status = 'failed';
         updatedSession.phases.phase4.completedAt = new Date();
         updatedSession.phases.phase4.error = error.message;
+        updatedSession.overallStatus = 'failed';
         
         await updatedSession.save();
         
-        console.error(`❌ Phase 4 failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 4 failed for chatId: ${chatId}`, error.message);
       });
-
   } catch (error) {
-    console.error('Error in triggerPhase4:', error);
+    // console.error('Error triggering Phase 4:', error);
   }
 };
 
 /**
- * Trigger Phase 5: Send chatId and refined problem to n8n webhook to get solutions
- * @param {string} chatId - Research session ID
- * @param {string} refinedProblem - Refined problem statement
+ * Trigger Phase 5: Literature Review
  */
 const triggerPhase5 = async (chatId, refinedProblem) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
     if (!session) {
-      console.error(`Session not found for chatId: ${chatId}`);
+      // console.error(`Session not found for chatId: ${chatId}`);
       return;
     }
 
     // Check if Phase 5 is already completed with valid data
     if (session.phases.phase5.status === 'completed') {
-      const hasValidData = session.phase5Solutions && session.phase5Solutions.length > 0;
+      const hasValidData = session.phase5LiteratureReview && session.phase5LiteratureReview.length > 0;
       if (hasValidData) {
-        console.log(`⏭️ Phase 5 already completed for chatId: ${chatId}, skipping...`);
-        // Trigger Phase 6 if not completed
-        if (session.phases.phase6.status !== 'completed' && refinedProblem) {
-          triggerPhase6(chatId, refinedProblem);
+        // console.log(`⏭️ Phase 5 already completed for chatId: ${chatId}, skipping...`);
+        // Trigger Phase 6 (Best Solution) if not completed
+        if (session.phases.phase6.status !== 'completed' && session.refinedProblem) {
+          triggerPhase6(chatId, session.refinedProblem);
         }
         return;
       }
     }
-
-    // Update Phase 5 status to processing
+    
     session.phases.phase5.status = 'processing';
     session.phases.phase5.startedAt = new Date();
     session.currentPhase = 5;
-    session.progress = 75;
+    session.progress = 85;
     
     await session.save();
 
-    // Send to Phase 5 n8n webhook
-    sendToPhase5Webhook(chatId, refinedProblem)
+    // console.log(`📚 Starting Phase 5 Literature Review for chatId: ${chatId}`);
+
+    sendToPhase5LiteratureReviewWebhook(chatId, refinedProblem)
       .then(async (phase5Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
-        // Parse Phase 5 response - handle both array and direct object
+        // Parse Phase 5 response
         const phase5Data = phase5Response.phase5Data;
         
-        let solutions, notes;
-        if (Array.isArray(phase5Data) && phase5Data.length > 0) {
-          // Array format: [{ solutions: [...] }]
-          solutions = phase5Data[0]?.solutions || [];
-          notes = phase5Data[0]?.notes || '';
-        } else if (phase5Data && phase5Data.solutions) {
-          // Direct object format: { solutions: [...] }
-          solutions = phase5Data.solutions || [];
-          notes = phase5Data.notes || '';
-        } else {
-          solutions = [];
-          notes = '';
-        }
+        // console.log('📊 Phase 5 Raw Data:', JSON.stringify(phase5Data, null, 2));
         
-        // Map solutions to database format
-        if (solutions && solutions.length > 0) {
-          updatedSession.phase5Solutions = solutions.map(sol => ({
-            title: sol.title || '',
-            summary: sol.summary || '',
-            features: Array.isArray(sol.features) ? sol.features : [],
-            limitations: Array.isArray(sol.limitations) ? sol.limitations : [sol.limitations || ''],
-            targetUsers: sol.target_users || '',
-            platformType: sol.platform_type || '',
-            officialWebsite: sol.official_website || '',
-            documentationLink: sol.documentation_link || '',
-            pricingOrLicense: sol.pricing_or_license || ''
-          }));
-          
-          updatedSession.phase5Notes = notes;
-          updatedSession.markModified('phase5Solutions');
-        }
-        
-        updatedSession.phases.phase5.n8nWebhookSent = true;
+        // Store literature review data
+        updatedSession.phase5LiteratureReview = phase5Data || [];
+        updatedSession.phases.phase5.status = 'completed';
+        updatedSession.phases.phase5.completedAt = new Date();
         updatedSession.phases.phase5.n8nResponse = phase5Response;
-        updatedSession.phases.phase5.phase5Data = phase5Response.phase5Data;
+        updatedSession.progress = 90;
         
-        // Validate Phase 5 data before marking as completed
-        const hasValidPhase5Data = updatedSession.phase5Solutions && 
-                                    updatedSession.phase5Solutions.length > 0;
+        await updatedSession.save();
         
-        if (hasValidPhase5Data) {
-          updatedSession.phases.phase5.status = 'completed';
-          updatedSession.phases.phase5.completedAt = new Date();
-          updatedSession.progress = 85;
-          updatedSession.overallStatus = 'processing';
-          await updatedSession.save();
-          
-          console.log(`✅ Phase 5 completed successfully for chatId: ${chatId}`);
-          
-          // Automatically trigger Phase 6
-          triggerPhase6(chatId, refinedProblem);
-        } else {
-          // No solutions found - mark Phase 5 as failed
-          updatedSession.phases.phase5.status = 'failed';
-          updatedSession.phases.phase5.completedAt = new Date();
-          updatedSession.phases.phase5.error = 'Phase 5 completed but no solutions were found';
-          updatedSession.progress = 75;
-          await updatedSession.save();
-          
-          console.error(`❌ Phase 5 webhook responded but no solutions for chatId: ${chatId}`);
-        }
+        // console.log(`✅ Phase 5 completed successfully for chatId: ${chatId}`);
+        // console.log(`⏸️ Waiting for user to provide expected outcome before starting Phase 6`);
+        
+        // Phase 6 will be triggered manually after user provides expected outcome
       })
       .catch(async (error) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
@@ -1223,26 +1440,27 @@ const triggerPhase5 = async (chatId, refinedProblem) => {
         updatedSession.phases.phase5.status = 'failed';
         updatedSession.phases.phase5.completedAt = new Date();
         updatedSession.phases.phase5.error = error.message;
+        updatedSession.overallStatus = 'failed';
         
         await updatedSession.save();
         
-        console.error(`❌ Phase 5 failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 5 failed for chatId: ${chatId}`, error.message);
       });
-
   } catch (error) {
-    console.error('Error in triggerPhase5:', error);
+    // console.error('Error triggering Phase 5:', error);
   }
 };
 
 /**
  * Trigger Phase 6: Generate best solution based on all analysis
+ * Phase 4 & 5 removed - Phase 3 now triggers Phase 4, then Phase 4 triggers Phase 6
  */
-const triggerPhase6 = async (chatId, refinedProblem) => {
+const triggerPhase6 = async (chatId, refinedProblem, expectedOutcome = '') => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
     if (!session) {
-      console.error(`Session not found for chatId: ${chatId}`);
+      // console.error(`Session not found for chatId: ${chatId}`);
       return;
     }
 
@@ -1250,7 +1468,7 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
     if (session.phases.phase6.status === 'completed') {
       const hasValidData = session.phase6Solution && session.phase6Solution.proposedSolution;
       if (hasValidData) {
-        console.log(`⏭️ Phase 6 already completed for chatId: ${chatId}, skipping...`);
+        // console.log(`⏭️ Phase 6 already completed for chatId: ${chatId}, skipping...`);
         return;
       }
     }
@@ -1262,7 +1480,9 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
     
     await session.save();
 
-    sendToPhase6Webhook(chatId, refinedProblem)
+    // console.log(`🏆 Starting Phase 6 with expected outcome: ${expectedOutcome || 'None provided'}`);
+
+    sendToPhase6Webhook(chatId, refinedProblem, expectedOutcome)
       .then(async (phase6Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
@@ -1331,7 +1551,7 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
           updatedSession.overallStatus = 'completed';
           await updatedSession.save();
           
-          console.log(`✅ Phase 6 completed successfully for chatId: ${chatId}`);
+          // console.log(`✅ Phase 6 completed successfully for chatId: ${chatId}`);
         } else {
           // No solution proposal - mark Phase 6 as failed
           updatedSession.phases.phase6.status = 'failed';
@@ -1341,7 +1561,7 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
           updatedSession.overallStatus = 'completed'; // Phase 5 was still successful
           await updatedSession.save();
           
-          console.error(`❌ Phase 6 webhook responded but no valid solution for chatId: ${chatId}`);
+          // console.error(`❌ Phase 6 webhook responded but no valid solution for chatId: ${chatId}`);
         }
       })
       .catch(async (error) => {
@@ -1355,11 +1575,11 @@ const triggerPhase6 = async (chatId, refinedProblem) => {
         
         await updatedSession.save();
         
-        console.error(`❌ Phase 6 failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 6 failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase6:', error);
+    // console.error('Error in triggerPhase6:', error);
   }
 };
 
@@ -1384,36 +1604,36 @@ const triggerPhase1Retry = async (chatId, originalInput) => {
         
         updatedSession.refinedProblem = phase1Response.refinedProblem || '';
         updatedSession.subtopics = phase1Response.subtopics || [];
-        updatedSession.embedding = phase1Response.embedding || [];
+        // Note: embeddings are not stored to save database space
         
         updatedSession.phases.phase1.status = 'completed';
         updatedSession.phases.phase1.completedAt = new Date();
         updatedSession.phases.phase1.n8nWebhookSent = true;
         updatedSession.phases.phase1.n8nResponse = phase1Response;
-        updatedSession.progress = 10;
+        updatedSession.progress = 15;
         
         await updatedSession.save();
         
-        // Automatically trigger Phase 2
-        triggerPhase2(chatId, updatedSession.refinedProblem, updatedSession.subtopics, updatedSession.embedding);
+        // Automatically trigger Phase 2 (embeddings not stored)
+        triggerPhase2(chatId, updatedSession.refinedProblem, updatedSession.subtopics);
       })
       .catch(async (error) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         updatedSession.phases.phase1.status = 'failed';
         updatedSession.phases.phase1.error = error.message;
         await updatedSession.save();
-        console.error(`❌ Phase 1 retry failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 1 retry failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase1Retry:', error);
+    // console.error('Error in triggerPhase1Retry:', error);
   }
 };
 
 /**
  * Retry Phase 2: Re-fetch research papers with duplicate removal
  */
-const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, embedding, deleteExisting) => {
+const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, deleteExisting) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
@@ -1426,8 +1646,8 @@ const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, embedding, 
     
     await session.save();
 
-    // Send with subtopics like the original Phase 2 trigger
-    sendToPhase2Webhook(chatId, refinedProblem, subtopics, embedding)
+    // Send with subtopics (embeddings not stored)
+    sendToPhase2Webhook(chatId, refinedProblem, subtopics)
       .then(async (phase2Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
@@ -1474,7 +1694,7 @@ const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, embedding, 
         if (pdfLinks.length > 0) {
           updatedSession.phases.phase2.status = 'completed';
           updatedSession.phases.phase2.completedAt = new Date();
-          updatedSession.progress = 25;
+          updatedSession.progress = 45;
           await updatedSession.save();
           
           // Automatically trigger Phase 3
@@ -1484,10 +1704,10 @@ const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, embedding, 
           updatedSession.phases.phase2.status = 'failed';
           updatedSession.phases.phase2.completedAt = new Date();
           updatedSession.phases.phase2.error = 'No papers found with valid PDF links after retry';
-          updatedSession.progress = 25;
+          updatedSession.progress = 45;
           await updatedSession.save();
           
-          console.error(`❌ Phase 2 retry completed but no papers found for chatId: ${chatId}`);
+          // console.error(`❌ Phase 2 retry completed but no papers found for chatId: ${chatId}`);
         }
       })
       .catch(async (error) => {
@@ -1495,11 +1715,11 @@ const triggerPhase2Retry = async (chatId, refinedProblem, subtopics, embedding, 
         updatedSession.phases.phase2.status = 'failed';
         updatedSession.phases.phase2.error = error.message;
         await updatedSession.save();
-        console.error(`❌ Phase 2 retry failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 2 retry failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase2Retry:', error);
+    // console.error('Error in triggerPhase2Retry:', error);
   }
 };
 
@@ -1510,291 +1730,408 @@ const triggerPhase3Retry = async (chatId, papers, deleteExisting) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
-    // Store existing enriched papers for merge
-    const existingPapers = deleteExisting ? [] : session.papers.filter(p => p.summary || p.methodology);
-    
+    if (!session) {
+      // console.error(`Session not found for chatId: ${chatId}`);
+      return;
+    }
+
+    // Reset Phase 3 status and sub-phases
     session.phases.phase3.status = 'processing';
     session.phases.phase3.startedAt = new Date();
+    session.phases.phase3.researchPaperAnalysis = {
+      sent: false,
+      completed: false,
+      error: null,
+      response: null,
+      data: null
+    };
+    session.phases.phase3.githubAnalysis = {
+      sent: false,
+      completed: false,
+      error: null,
+      response: null,
+      data: null
+    };
     session.currentPhase = 3;
+    session.progress = 45;
     
     await session.save();
 
-    // Extract PDF links only, same as original Phase 3 trigger
-    const pdfLinks = papers.map(p => p.pdfLink).filter(link => link);
+    // console.log(`🔄 Retrying Phase 3 parallel analysis for chatId: ${chatId}`);
 
-    sendToPhase3Webhook(chatId, pdfLinks)
-      .then(async (phase3Response) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
+    // Get data from Phase 2
+    const papersData = session.papers || [];
+    const githubProjects = session.githubProjects || [];
+
+    // Split papers into chunks of maximum 3 papers each
+    const MAX_PAPERS_PER_CHUNK = 3;
+    const paperChunks = [];
+    for (let i = 0; i < papersData.length; i += MAX_PAPERS_PER_CHUNK) {
+      paperChunks.push(papersData.slice(i, i + MAX_PAPERS_PER_CHUNK));
+    }
+    
+    // Split GitHub projects into chunks using 4-3-3 pattern
+    const githubChunks = [];
+    if (githubProjects.length > 0) {
+      const firstChunkSize = Math.min(4, githubProjects.length);
+      githubChunks.push(githubProjects.slice(0, firstChunkSize));
+      
+      if (githubProjects.length > firstChunkSize) {
+        const remainingProjects = githubProjects.slice(firstChunkSize);
+        const secondChunkSize = Math.min(3, remainingProjects.length);
+        githubChunks.push(remainingProjects.slice(0, secondChunkSize));
         
-        const phase3Data = phase3Response.phase3Data || [];
+        if (remainingProjects.length > secondChunkSize) {
+          githubChunks.push(remainingProjects.slice(secondChunkSize));
+        }
+      }
+    }
+
+    // console.log(`📚 Retry: Splitting ${papersData.length} papers into ${paperChunks.length} chunks:`, paperChunks.map(c => c.length));
+    // console.log(`🔧 Retry: Splitting ${githubProjects.length} GitHub projects into ${githubChunks.length} chunks:`, githubChunks.map(c => c.length));
+
+    // Get refined problem from session
+    const refinedProblem = session.refinedProblem || '';
+
+    // Create promises for all paper analysis webhooks
+    const paperAnalysisPromises = paperChunks.map((chunk, index) => 
+      sendToPhase3ResearchPaperWebhook(chatId, chunk, index + 1, paperChunks.length, refinedProblem)
+        .then(response => ({ type: 'paperAnalysis', chunk: index + 1, success: true, data: response }))
+        .catch(error => ({ type: 'paperAnalysis', chunk: index + 1, success: false, error: error.message }))
+    );
+    
+    // Create promises for all GitHub analysis webhooks
+    const githubAnalysisPromises = githubChunks.map((chunk, index) =>
+      sendToPhase3GitHubWebhook(chatId, chunk, index + 1, githubChunks.length, refinedProblem)
+        .then(response => ({ type: 'githubAnalysis', chunk: index + 1, success: true, data: response }))
+        .catch(error => ({ type: 'githubAnalysis', chunk: index + 1, success: false, error: error.message }))
+    );
+
+    // Combine all promises
+    const allPromises = [...paperAnalysisPromises, ...githubAnalysisPromises];
+
+    // Mark both as sent
+    const updatedSession = await ResearchSession.findOne({ chatId });
+    updatedSession.phases.phase3.researchPaperAnalysis.sent = true;
+    updatedSession.phases.phase3.githubAnalysis.sent = true;
+    await updatedSession.save();
+
+    // Wait for all analyses to complete
+    Promise.allSettled(allPromises)
+      .then(async (results) => {
+        const session = await ResearchSession.findOne({ chatId });
         
-        if (Array.isArray(phase3Data) && phase3Data.length > 0) {
-          const newEnrichedPapers = [];
-          
-          phase3Data.forEach(analyzedPaper => {
-            const pdfLink = analyzedPaper.pdf_link || analyzedPaper.pdfLink || analyzedPaper.pdf_url;
-            const matchingPaper = updatedSession.papers.find(p => 
-              p.pdfLink === pdfLink || 
-              (p.title && analyzedPaper.title && p.title.toLowerCase() === analyzedPaper.title.toLowerCase())
-            );
+        let combinedPaperAnalysis = [];
+        let combinedGithubAnalysis = [];
+        let paperChunksCompleted = 0;
+        let githubChunksCompleted = 0;
+        let paperErrors = [];
+        let githubErrors = [];
+        
+        // Count total expected chunks
+        const totalPaperChunks = paperChunks.length;
+        const totalGithubChunks = githubChunks.length;
+        
+        // Process each result
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            const { type, chunk, success, data, error } = result.value;
             
-            if (matchingPaper && analyzedPaper.summary && analyzedPaper.methodology) {
-              newEnrichedPapers.push({
-                title: matchingPaper.title,
-                authors: matchingPaper.authors,
-                abstract: matchingPaper.abstract,
-                pdfLink: matchingPaper.pdfLink,
-                semanticScore: matchingPaper.semanticScore,
-                year: matchingPaper.year,
-                summary: analyzedPaper.summary,
-                methodology: analyzedPaper.methodology,
-                algorithmsUsed: analyzedPaper.algorithms_used || [],
-                result: analyzedPaper.result || '',
-                conclusion: analyzedPaper.conclusion || '',
-                limitations: analyzedPaper.limitations || '',
-                futureScope: analyzedPaper.future_scope || ''
-              });
+            if (success) {
+              if (type === 'paperAnalysis') {
+                const analysisData = data.paperAnalysisData || [];
+                
+                // Combine paper analysis data from all chunks
+                if (Array.isArray(analysisData)) {
+                  combinedPaperAnalysis = combinedPaperAnalysis.concat(analysisData);
+                }
+                
+                paperChunksCompleted++;
+                // console.log(`✅ Phase 3 Research Paper Analysis Retry Chunk ${chunk}/${totalPaperChunks} completed (${analysisData.length} papers)`);
+                
+                // Mark as completed when all chunks are done
+                if (paperChunksCompleted === totalPaperChunks) {
+                  session.phases.phase3.researchPaperAnalysis.completed = true;
+                  session.phases.phase3.researchPaperAnalysis.response = { 
+                    combined: true, 
+                    totalPapers: combinedPaperAnalysis.length,
+                    chunks: totalPaperChunks
+                  };
+                  session.phases.phase3.researchPaperAnalysis.data = combinedPaperAnalysis;
+                  
+                  // console.log(`✅ Phase 3 Research Paper Analysis Retry FULLY completed (${combinedPaperAnalysis.length} total papers from ${totalPaperChunks} chunks)`);
+                }
+              }
+              else if (type === 'githubAnalysis') {
+                const analysisData = data.githubAnalysisData || [];
+                
+                // Combine GitHub analysis data from all chunks
+                if (Array.isArray(analysisData)) {
+                  combinedGithubAnalysis = combinedGithubAnalysis.concat(analysisData);
+                }
+                
+                githubChunksCompleted++;
+                // console.log(`✅ Phase 3 GitHub Analysis Retry Chunk ${chunk}/${totalGithubChunks} completed (${analysisData.length} projects)`);
+                
+                // Mark as completed when all chunks are done
+                if (githubChunksCompleted === totalGithubChunks) {
+                  session.phases.phase3.githubAnalysis.completed = true;
+                  session.phases.phase3.githubAnalysis.response = {
+                    combined: true,
+                    totalProjects: combinedGithubAnalysis.length,
+                    chunks: totalGithubChunks
+                  };
+                  session.phases.phase3.githubAnalysis.data = combinedGithubAnalysis;
+                  
+                  // console.log(`✅ Phase 3 GitHub Analysis Retry FULLY completed (${combinedGithubAnalysis.length} total projects from ${totalGithubChunks} chunks)`);
+                }
+              }
+            } else {
+              if (type === 'paperAnalysis') {
+                paperErrors.push(`Chunk ${chunk}: ${error}`);
+                // console.error(`❌ Phase 3 Research Paper Analysis Retry Chunk ${chunk} failed: ${error}`);
+                
+                paperChunksCompleted++;
+                // If all chunks processed, mark as completed
+                if (paperChunksCompleted === totalPaperChunks) {
+                  session.phases.phase3.researchPaperAnalysis.completed = true;
+                  if (combinedPaperAnalysis.length === 0) {
+                    session.phases.phase3.researchPaperAnalysis.error = paperErrors.join('; ');
+                  } else {
+                    session.phases.phase3.researchPaperAnalysis.response = { 
+                      combined: true, 
+                      totalPapers: combinedPaperAnalysis.length,
+                      chunks: totalPaperChunks,
+                      partialErrors: paperErrors
+                    };
+                    session.phases.phase3.researchPaperAnalysis.data = combinedPaperAnalysis;
+                  }
+                }
+              } else if (type === 'githubAnalysis') {
+                githubErrors.push(`Chunk ${chunk}: ${error}`);
+                // console.error(`❌ Phase 3 GitHub Analysis Retry Chunk ${chunk} failed: ${error}`);
+                
+                githubChunksCompleted++;
+                // If all chunks processed, mark as completed
+                if (githubChunksCompleted === totalGithubChunks) {
+                  session.phases.phase3.githubAnalysis.completed = true;
+                  if (combinedGithubAnalysis.length === 0) {
+                    session.phases.phase3.githubAnalysis.error = githubErrors.join('; ');
+                  } else {
+                    session.phases.phase3.githubAnalysis.response = {
+                      combined: true,
+                      totalProjects: combinedGithubAnalysis.length,
+                      chunks: totalGithubChunks,
+                      partialErrors: githubErrors
+                    };
+                    session.phases.phase3.githubAnalysis.data = combinedGithubAnalysis;
+                  }
+                }
+              }
             }
-          });
-
-          // Merge and remove duplicates based on PDF link
-          let mergedPapers;
-          if (deleteExisting) {
-            mergedPapers = newEnrichedPapers;
-          } else {
-            const paperMap = new Map();
-            
-            // Add existing papers
-            existingPapers.forEach(paper => {
-              paperMap.set(paper.pdfLink, paper);
-            });
-            
-            // Add or update with new papers
-            newEnrichedPapers.forEach(paper => {
-              paperMap.set(paper.pdfLink, paper);
-            });
-            
-            mergedPapers = Array.from(paperMap.values());
           }
-          
-          updatedSession.papers = mergedPapers;
         }
         
-        updatedSession.phases.phase3.status = 'completed';
-        updatedSession.phases.phase3.completedAt = new Date();
-        updatedSession.phases.phase3.n8nWebhookSent = true;
-        updatedSession.phases.phase3.n8nResponse = phase3Response;
-        updatedSession.phases.phase3.phase3Data = phase3Response.phase3Data;
-        updatedSession.progress = 55;
+        // Check completion
+        const paperAnalysisCompleted = session.phases.phase3.researchPaperAnalysis.completed;
+        const githubAnalysisCompleted = session.phases.phase3.githubAnalysis.completed;
         
-        await updatedSession.save();
+        // console.log(`📊 Phase 3 Retry Status Check for ${chatId}:`, { paperAnalysisCompleted, githubAnalysisCompleted, bothComplete: paperAnalysisCompleted && githubAnalysisCompleted });
         
-        // Automatically trigger Phase 4
-        triggerPhase4(chatId, updatedSession.refinedProblem);
+        if (paperAnalysisCompleted && githubAnalysisCompleted) {
+          session.phases.phase3.status = 'completed';
+          session.phases.phase3.completedAt = new Date();
+          session.progress = 85;
+          
+          // console.log(`✅ Phase 3 retry completed for ${chatId}`, { paperCompleted: session.phases.phase3.researchPaperAnalysis.completed, githubCompleted: session.phases.phase3.githubAnalysis.completed, status: session.phases.phase3.status });
+          
+          await session.save();
+          
+          // console.log(`💾 Phase 3 data saved to DB for ${chatId}`);
+          
+          // Trigger Phase 4 (Gap Finder)
+          if (session.refinedProblem) {
+            triggerPhase4(chatId, session.refinedProblem);
+          }
+        } else {
+          // console.log('🔄 Phase 3 retry still processing...');
+          await session.save();
+        }
       })
       .catch(async (error) => {
-        const updatedSession = await ResearchSession.findOne({ chatId });
-        updatedSession.phases.phase3.status = 'failed';
-        updatedSession.phases.phase3.error = error.message;
-        await updatedSession.save();
-        console.error(`❌ Phase 3 retry failed for chatId: ${chatId}`, error.message);
+        const session = await ResearchSession.findOne({ chatId });
+        session.phases.phase3.status = 'failed';
+        session.phases.phase3.completedAt = new Date();
+        session.phases.phase3.error = error.message;
+        await session.save();
+        // console.error(`❌ Phase 3 retry failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase3Retry:', error);
+    // console.error('Error in triggerPhase3Retry:', error);
   }
 };
 
 /**
- * Retry Phase 4: Re-analyze methodologies with merge option
+ * Retry Phase 4: Re-run gap analysis
  */
 const triggerPhase4Retry = async (chatId, refinedProblem, deleteExisting) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
-    // Store existing analysis for merge
-    const existingAnalysis = deleteExisting ? null : session.phase4Analysis;
-    
+    if (!session) {
+      // console.error(`Session not found for chatId: ${chatId}`);
+      return;
+    }
+
+    // Clear Phase 4 data if requested
+    if (deleteExisting) {
+      session.phase4GapAnalysis = null;
+      // console.log(`🗑️ Cleared Phase 4 data for chatId: ${chatId}`);
+    }
+
+    // Reset phase status
     session.phases.phase4.status = 'processing';
     session.phases.phase4.startedAt = new Date();
+    session.phases.phase4.completedAt = null;
+    session.phases.phase4.error = null;
     session.currentPhase = 4;
+    session.progress = 75;
     
     await session.save();
 
-    sendToPhase4Webhook(chatId, refinedProblem)
+    // console.log(`🔄 Retrying Phase 4 Gap Finder for chatId: ${chatId}`);
+
+    // Call Phase 4 webhook
+    sendToPhase4GapFinderWebhook(chatId, refinedProblem)
       .then(async (phase4Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
-        const phase4Data = phase4Response.phase4Data || [];
+        // Parse Phase 4 response
+        const phase4Data = phase4Response.phase4Data;
         
+        // console.log('📊 Phase 4 Retry Raw Data:', JSON.stringify(phase4Data, null, 2));
+        
+        let gapAnalysis;
         if (Array.isArray(phase4Data) && phase4Data.length > 0) {
-          const cleanedOutput = phase4Data[0]?.cleanedOutput;
-          
-          if (cleanedOutput) {
-            let newAnalysis = {
-              mostCommonMethodologies: cleanedOutput.most_common_methodologies || [],
-              technologyOrAlgorithms: cleanedOutput.technology_or_algorithms || [],
-              datasetsUsed: cleanedOutput.datasets_used || [],
-              uniqueOrLessCommonApproaches: cleanedOutput.unique_or_less_common_approaches || []
-            };
-
-            // Merge with existing if not deleting
-            if (!deleteExisting && existingAnalysis) {
-              // Merge methodologies (remove duplicates by title)
-              const methodMap = new Map();
-              [...existingAnalysis.mostCommonMethodologies, ...newAnalysis.mostCommonMethodologies].forEach(m => {
-                methodMap.set(m.title.toLowerCase(), m);
-              });
-              newAnalysis.mostCommonMethodologies = Array.from(methodMap.values());
-
-              // Merge technologies (remove duplicates)
-              newAnalysis.technologyOrAlgorithms = [...new Set([
-                ...existingAnalysis.technologyOrAlgorithms,
-                ...newAnalysis.technologyOrAlgorithms
-              ])];
-
-              // Merge datasets (remove duplicates)
-              newAnalysis.datasetsUsed = [...new Set([
-                ...existingAnalysis.datasetsUsed,
-                ...newAnalysis.datasetsUsed
-              ])];
-
-              // Merge unique approaches (remove duplicates by title)
-              const approachMap = new Map();
-              [...existingAnalysis.uniqueOrLessCommonApproaches, ...newAnalysis.uniqueOrLessCommonApproaches].forEach(a => {
-                approachMap.set(a.title.toLowerCase(), a);
-              });
-              newAnalysis.uniqueOrLessCommonApproaches = Array.from(approachMap.values());
-            }
-            
-            updatedSession.phase4Analysis = newAnalysis;
-          }
+          gapAnalysis = phase4Data[0];
+        } else if (phase4Data && typeof phase4Data === 'object') {
+          gapAnalysis = phase4Data;
+        } else {
+          gapAnalysis = null;
         }
         
-        updatedSession.phases.phase4.status = 'completed';
-        updatedSession.phases.phase4.completedAt = new Date();
-        updatedSession.phases.phase4.n8nWebhookSent = true;
-        updatedSession.phases.phase4.n8nResponse = phase4Response;
-        updatedSession.phases.phase4.phase4Data = phase4Response.phase4Data;
-        updatedSession.progress = 70;
-        
-        await updatedSession.save();
-        
-        // Automatically trigger Phase 5
-        triggerPhase5(chatId, updatedSession.refinedProblem);
+        if (gapAnalysis) {
+          // Store gap analysis data with the actual structure from webhook
+          updatedSession.phase4GapAnalysis = {
+            evidence_based_gaps: gapAnalysis.evidence_based_gaps || [],
+            research_gaps_from_papers: gapAnalysis.research_gaps_from_papers || [],
+            ai_predicted_possible_gaps: gapAnalysis.ai_predicted_possible_gaps || [],
+            confidence_level: gapAnalysis.confidence_level || 'MEDIUM',
+            note: gapAnalysis.note || ''
+          };
+          
+          updatedSession.phases.phase4.status = 'completed';
+          updatedSession.phases.phase4.completedAt = new Date();
+          updatedSession.phases.phase4.n8nResponse = phase4Response;
+          updatedSession.progress = 80;
+          
+          await updatedSession.save();
+          
+          // console.log(`✅ Phase 4 retry completed successfully for chatId: ${chatId}`);
+          // console.log(`📊 Stored ${gapAnalysis.evidence_based_gaps?.length || 0} evidence-based gaps, ${gapAnalysis.research_gaps_from_papers?.length || 0} research gaps from papers, and ${gapAnalysis.ai_predicted_possible_gaps?.length || 0} AI-predicted gaps`);
+          
+          // Trigger Phase 5 (Literature Review) if not completed
+          if (updatedSession.phases.phase5.status !== 'completed') {
+            triggerPhase5(chatId, updatedSession.refinedProblem);
+          }
+        } else {
+          throw new Error('Phase 4 returned invalid or empty data');
+        }
       })
       .catch(async (error) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
+        
         updatedSession.phases.phase4.status = 'failed';
+        updatedSession.phases.phase4.completedAt = new Date();
         updatedSession.phases.phase4.error = error.message;
+        
         await updatedSession.save();
-        console.error(`❌ Phase 4 retry failed for chatId: ${chatId}`, error.message);
+        
+        // console.error(`❌ Phase 4 retry failed for chatId: ${chatId}`, error.message);
       });
-
   } catch (error) {
-    console.error('Error in triggerPhase4Retry:', error);
+    // console.error('Error in triggerPhase4Retry:', error);
   }
 };
 
 /**
- * Retry Phase 5: Re-fetch solutions with merge option
+ * Retry Phase 5: Re-run Literature Review
  */
 const triggerPhase5Retry = async (chatId, refinedProblem, deleteExisting) => {
   try {
     const session = await ResearchSession.findOne({ chatId });
     
-    // Store existing solutions for merge
-    const existingSolutions = deleteExisting ? [] : [...session.phase5Solutions];
-    
+    if (!session) {
+      // console.error(`Session not found for chatId: ${chatId}`);
+      return;
+    }
+
+    // Clear Phase 5 data if requested
+    if (deleteExisting) {
+      session.phase5LiteratureReview = null;
+      // console.log(`🗑️ Cleared Phase 5 data for chatId: ${chatId}`);
+    }
+
+    // Reset phase status
     session.phases.phase5.status = 'processing';
     session.phases.phase5.startedAt = new Date();
+    session.phases.phase5.completedAt = null;
+    session.phases.phase5.error = null;
     session.currentPhase = 5;
+    session.progress = 85;
     
     await session.save();
 
-    sendToPhase5Webhook(chatId, refinedProblem)
+    // console.log(`🔄 Retrying Phase 5 Literature Review for chatId: ${chatId}`);
+
+    // Call Phase 5 webhook
+    sendToPhase5LiteratureReviewWebhook(chatId, refinedProblem)
       .then(async (phase5Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
-        // Parse Phase 5 response - handle both array and direct object
+        // Parse Phase 5 response
         const phase5Data = phase5Response.phase5Data;
         
-        let newSolutions, notes;
-        if (Array.isArray(phase5Data) && phase5Data.length > 0) {
-          // Array format: [{ solutions: [...] }]
-          newSolutions = phase5Data[0]?.solutions || [];
-          notes = phase5Data[0]?.notes || '';
-        } else if (phase5Data && phase5Data.solutions) {
-          // Direct object format: { solutions: [...] }
-          newSolutions = phase5Data.solutions || [];
-          notes = phase5Data.notes || '';
-        } else {
-          newSolutions = [];
-          notes = '';
-        }
+        // console.log('📊 Phase 5 Retry Raw Data:', JSON.stringify(phase5Data, null, 2));
         
-        if (newSolutions && newSolutions.length > 0) {
-          const mappedNewSolutions = newSolutions.map(sol => ({
-              title: sol.title || '',
-              summary: sol.summary || '',
-              features: Array.isArray(sol.features) ? sol.features : [],
-              limitations: Array.isArray(sol.limitations) ? sol.limitations : [sol.limitations || ''],
-              targetUsers: sol.target_users || '',
-              platformType: sol.platform_type || '',
-              officialWebsite: sol.official_website || '',
-              documentationLink: sol.documentation_link || '',
-              pricingOrLicense: sol.pricing_or_license || ''
-            }));
-
-            // Merge and remove duplicates based on title and official website
-            let mergedSolutions;
-            if (deleteExisting) {
-              mergedSolutions = mappedNewSolutions;
-            } else {
-              const solutionMap = new Map();
-              
-              // Add existing solutions
-              existingSolutions.forEach(sol => {
-                const key = `${sol.title.toLowerCase()}_${sol.officialWebsite}`;
-                solutionMap.set(key, sol);
-              });
-              
-              // Add or update with new solutions
-              mappedNewSolutions.forEach(sol => {
-                const key = `${sol.title.toLowerCase()}_${sol.officialWebsite}`;
-                solutionMap.set(key, sol);
-              });
-              
-              mergedSolutions = Array.from(solutionMap.values());
-            }
-            
-            updatedSession.phase5Solutions = mergedSolutions;
-            updatedSession.phase5Notes = notes;
-            updatedSession.markModified('phase5Solutions');
-          }
-        
+        // Store literature review data
+        updatedSession.phase5LiteratureReview = phase5Data || [];
         updatedSession.phases.phase5.status = 'completed';
         updatedSession.phases.phase5.completedAt = new Date();
-        updatedSession.phases.phase5.n8nWebhookSent = true;
         updatedSession.phases.phase5.n8nResponse = phase5Response;
-        updatedSession.phases.phase5.phase5Data = phase5Response.phase5Data;
-        updatedSession.progress = 85;
+        updatedSession.progress = 90;
         
         await updatedSession.save();
         
-        // Automatically trigger Phase 6
-        triggerPhase6(chatId, updatedSession.refinedProblem);
+        // console.log(`✅ Phase 5 retry completed successfully for chatId: ${chatId}`);
+        // console.log(`⏸️ Waiting for user to provide expected outcome before starting Phase 6`);
+        
+        // Phase 6 will be triggered manually after user provides expected outcome
       })
       .catch(async (error) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
+        
         updatedSession.phases.phase5.status = 'failed';
+        updatedSession.phases.phase5.completedAt = new Date();
         updatedSession.phases.phase5.error = error.message;
+        
         await updatedSession.save();
-        console.error(`❌ Phase 5 retry failed for chatId: ${chatId}`, error.message);
+        
+        // console.error(`❌ Phase 5 retry failed for chatId: ${chatId}`, error.message);
       });
-
   } catch (error) {
-    console.error('Error in triggerPhase5Retry:', error);
+    // console.error('Error in triggerPhase5Retry:', error);
   }
 };
 
@@ -1816,7 +2153,11 @@ const triggerPhase6Retry = async (chatId, refinedProblem, deleteExisting) => {
     
     await session.save();
 
-    sendToPhase6Webhook(chatId, refinedProblem)
+    // Use stored expectedOutcome from session
+    const expectedOutcome = session.expectedOutcome || '';
+    // console.log(`🔄 Retrying Phase 6 with expected outcome: ${expectedOutcome || 'None provided'}`);
+
+    sendToPhase6Webhook(chatId, refinedProblem, expectedOutcome)
       .then(async (phase6Response) => {
         const updatedSession = await ResearchSession.findOne({ chatId });
         
@@ -1883,11 +2224,11 @@ const triggerPhase6Retry = async (chatId, refinedProblem, deleteExisting) => {
         updatedSession.phases.phase6.status = 'failed';
         updatedSession.phases.phase6.error = error.message;
         await updatedSession.save();
-        console.error(`❌ Phase 6 retry failed for chatId: ${chatId}`, error.message);
+        // console.error(`❌ Phase 6 retry failed for chatId: ${chatId}`, error.message);
       });
 
   } catch (error) {
-    console.error('Error in triggerPhase6Retry:', error);
+    // console.error('Error in triggerPhase6Retry:', error);
   }
 };
 

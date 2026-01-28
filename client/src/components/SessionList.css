@@ -297,14 +297,50 @@
 }
 
 /* Responsive Design */
+@media (max-width: 968px) {
+  .session-list-container {
+    padding: 1.5rem;
+    padding-top: 90px;
+  }
+
+  .sessions-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+}
+
 @media (max-width: 768px) {
+  .session-list-container {
+    padding: 1rem;
+    padding-top: 80px;
+  }
+
+  .session-list-header h1 {
+    font-size: 2rem;
+  }
+
   .sessions-grid {
     grid-template-columns: 1fr;
+    gap: 1.2rem;
   }
 
   .session-list-header {
     flex-direction: column;
     text-align: center;
+    gap: 1rem;
+  }
+
+  .back-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .session-card {
+    padding: 1.5rem;
+  }
+
+  .session-card h3 {
+    font-size: 1.1rem;
   }
 
   .pagination {
@@ -314,5 +350,44 @@
 
   .pagination-button {
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .session-list-container {
+    padding: 0.8rem;
+    padding-top: 70px;
+  }
+
+  .session-list-header h1 {
+    font-size: 1.6rem;
+  }
+
+  .session-card {
+    padding: 1.2rem;
+  }
+
+  .session-card h3 {
+    font-size: 1rem;
+  }
+
+  .session-info {
+    font-size: 0.85rem;
+  }
+
+  .session-actions {
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  .session-button {
+    width: 100%;
+    justify-content: center;
+    font-size: 0.9rem;
+  }
+
+  .back-button {
+    padding: 0.8rem 1.5rem;
+    font-size: 0.9rem;
   }
 }

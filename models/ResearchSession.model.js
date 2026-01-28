@@ -34,9 +34,10 @@ const researchSessionSchema = new mongoose.Schema({
     default: null,
     trim: true
   },
-  refineProblemEmbedding: {
-    type: [Number],
-    default: null
+  expectedOutcome: {
+    type: String,
+    default: null,
+    trim: true
   },
   subtopics: [{
     subtopic_id: Number,
@@ -52,7 +53,6 @@ const researchSessionSchema = new mongoose.Schema({
     pdfLink: String,
     semanticScore: Number,
     semanticScorePercent: Number,
-    embedding: [Number],
     year: Number,
     // Phase 3 enriched data
     summary: String,
@@ -63,21 +63,66 @@ const researchSessionSchema = new mongoose.Schema({
     limitations: String,
     futureScope: String
   }],
-  // Phase 4 Analysis Results
+  // Phase 4 Analysis Results (parallel sub-phases)
   phase4Analysis: {
-    mostCommonMethodologies: [{
-      title: String,
-      description: String
-    }],
-    technologyOrAlgorithms: [String],
-    datasetsUsed: [String],
-    uniqueOrLessCommonApproaches: [{
-      title: String,
-      description: String
-    }]
+    researchPaperAnalysis: {
+      completed: Boolean,
+      mostCommonMethodologies: [{
+        title: String,
+        description: String
+      }],
+      technologyOrAlgorithms: [String],
+      datasetsUsed: [String],
+      uniqueOrLessCommonApproaches: [{
+        title: String,
+        description: String
+      }]
+    },
+    githubAnalysis: {
+      completed: Boolean,
+      mostCommonMethodologies: [{
+        title: String,
+        description: String
+      }],
+      technologyOrAlgorithms: [String],
+      datasetsUsed: [String],
+      uniqueOrLessCommonApproaches: [{
+        title: String,
+        description: String
+      }]
+    },
+    applicationAnalysis: {
+      completed: Boolean,
+      mostCommonMethodologies: [{
+        title: String,
+        description: String
+      }],
+      technologyOrAlgorithms: [String],
+      datasetsUsed: [String],
+      uniqueOrLessCommonApproaches: [{
+        title: String,
+        description: String
+      }]
+    }
   },
-  // Phase 5 Solutions
-  phase5Solutions: [{
+  // Phase 4 Gap Analysis - New Gap Finder phase
+  phase4GapAnalysis: {
+    evidence_based_gaps: [{
+      gap: String,
+      source_type: String,
+      evidence_excerpt: String
+    }],
+    ai_predicted_possible_gaps: [{
+      predicted_gap: String,
+      reasoning: String
+    }],
+    confidence_level: String,
+    note: String
+  },
+  // Phase 5 Literature Review
+  phase5LiteratureReview: mongoose.Schema.Types.Mixed,
+  // Phase 2 Applications (moved from Phase 5)
+  applications: [{
     title: String,
     summary: String,
     features: [String],
@@ -88,7 +133,10 @@ const researchSessionSchema = new mongoose.Schema({
     documentationLink: String,
     pricingOrLicense: String
   }],
-  phase5Notes: String,
+  applicationsNotes: String,
+  
+  // Phase 2 GitHub Projects - Store complete GitHub API response
+  githubProjects: [mongoose.Schema.Types.Mixed],
   // Phase 6 Best Solution
   phase6Solution: {
     proposedSolution: String,
@@ -135,6 +183,29 @@ const researchSessionSchema = new mongoose.Schema({
       startedAt: Date,
       completedAt: Date,
       error: String,
+      // Track individual webhook statuses
+      papers: {
+        sent: { type: Boolean, default: false },
+        completed: { type: Boolean, default: false },
+        error: String,
+        response: mongoose.Schema.Types.Mixed,
+        data: mongoose.Schema.Types.Mixed
+      },
+      applications: {
+        sent: { type: Boolean, default: false },
+        completed: { type: Boolean, default: false },
+        error: String,
+        response: mongoose.Schema.Types.Mixed,
+        data: mongoose.Schema.Types.Mixed
+      },
+      github: {
+        sent: { type: Boolean, default: false },
+        completed: { type: Boolean, default: false },
+        error: String,
+        response: mongoose.Schema.Types.Mixed,
+        data: mongoose.Schema.Types.Mixed
+      },
+      // Legacy fields for backward compatibility
       n8nWebhookSent: {
         type: Boolean,
         default: false
@@ -151,6 +222,22 @@ const researchSessionSchema = new mongoose.Schema({
       startedAt: Date,
       completedAt: Date,
       error: String,
+      // Track individual analysis webhook statuses
+      researchPaperAnalysis: {
+        sent: { type: Boolean, default: false },
+        completed: { type: Boolean, default: false },
+        error: String,
+        response: mongoose.Schema.Types.Mixed,
+        data: mongoose.Schema.Types.Mixed
+      },
+      githubAnalysis: {
+        sent: { type: Boolean, default: false },
+        completed: { type: Boolean, default: false },
+        error: String,
+        response: mongoose.Schema.Types.Mixed,
+        data: mongoose.Schema.Types.Mixed
+      },
+      // Legacy fields for backward compatibility
       n8nWebhookSent: {
         type: Boolean,
         default: false
@@ -167,6 +254,21 @@ const researchSessionSchema = new mongoose.Schema({
       startedAt: Date,
       completedAt: Date,
       error: String,
+      researchPaperAnalysis: {
+        completed: Boolean,
+        n8nWebhookSent: Boolean,
+        n8nResponse: mongoose.Schema.Types.Mixed
+      },
+      githubAnalysis: {
+        completed: Boolean,
+        n8nWebhookSent: Boolean,
+        n8nResponse: mongoose.Schema.Types.Mixed
+      },
+      applicationAnalysis: {
+        completed: Boolean,
+        n8nWebhookSent: Boolean,
+        n8nResponse: mongoose.Schema.Types.Mixed
+      },
       n8nWebhookSent: {
         type: Boolean,
         default: false
@@ -237,6 +339,8 @@ const researchSessionSchema = new mongoose.Schema({
 researchSessionSchema.index({ createdAt: -1 });
 researchSessionSchema.index({ overallStatus: 1 });
 researchSessionSchema.index({ currentPhase: 1 });
+// Compound index for user-filtered queries sorted by date
+researchSessionSchema.index({ chatId: 1, createdAt: -1 });
 
 // Virtual for session age
 researchSessionSchema.virtual('sessionAge').get(function() {

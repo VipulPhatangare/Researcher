@@ -57,17 +57,38 @@ const Landing = () => {
           )}
 
           <div className="landing-features">
-            <div className="feature-item">
-              <span className="feature-icon">🎯</span>
-              <span>6-Phase Analysis</span>
-            </div>
-            <div className="feature-item">
-              <span className="feature-icon">🤖</span>
-              <span>AI-Powered Insights</span>
-            </div>
-            <div className="feature-item">
-              <span className="feature-icon">📊</span>
-              <span>Comprehensive Reports</span>
+            <h3 className="features-title">Powerful Research Features</h3>
+            <div className="features-grid">
+              <div className="feature-card">
+                <div className="feature-icon">🎯</div>
+                <h4>6-Phase Analysis</h4>
+                <p>Comprehensive research workflow from problem refinement to solution generation</p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">🤖</div>
+                <h4>AI-Powered Insights</h4>
+                <p>Advanced AI models analyze papers, identify gaps, and generate solutions</p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">📊</div>
+                <h4>Comprehensive Reports</h4>
+                <p>Detailed literature reviews, gap analysis, and actionable recommendations</p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">⚡</div>
+                <h4>Parallel Processing</h4>
+                <p>Analyze multiple research papers and GitHub repositories simultaneously</p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">💬</div>
+                <h4>Interactive Chat</h4>
+                <p>Ask questions and get clarifications about your research findings</p>
+              </div>
+              <div className="feature-card">
+                <div className="feature-icon">📥</div>
+                <h4>Export & Share</h4>
+                <p>Download complete research reports in multiple formats</p>
+              </div>
             </div>
           </div>
         </div>

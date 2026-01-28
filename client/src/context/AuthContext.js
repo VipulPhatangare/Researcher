@@ -30,38 +30,38 @@ export const AuthProvider = ({ children }) => {
       const email = localStorage.getItem('userEmail');
       const storedUserData = localStorage.getItem('userData');
       
-      console.log('🔍 Checking auth on mount:', { email, hasUserData: !!storedUserData });
+      // console.log('🔍 Checking auth on mount:', { email, hasUserData: !!storedUserData });
       
       if (email && storedUserData) {
         try {
           // Parse and set user from localStorage
           const userData = JSON.parse(storedUserData);
-          console.log('✅ Setting user from localStorage:', userData);
+          // console.log('✅ Setting user from localStorage:', userData);
           setUser(userData);
           
           // Verify user still exists in background
           try {
             await verifyToken(email);
-            console.log('✅ User verified successfully');
+            // console.log('✅ User verified successfully');
           } catch (error) {
-            console.log('❌ Verification failed:', error);
+            // console.log('❌ Verification failed:', error);
             // If verification fails, clear everything
             localStorage.removeItem('userEmail');
             localStorage.removeItem('userData');
             setUser(null);
           }
         } catch (error) {
-          console.error('❌ Error parsing user data:', error);
+          // console.error('❌ Error parsing user data:', error);
           localStorage.removeItem('userEmail');
           localStorage.removeItem('userData');
           setUser(null);
         }
       } else {
-        console.log('❌ No stored auth data found');
+        // console.log('❌ No stored auth data found');
       }
       
       setLoading(false);
-      console.log('✅ Auth loading complete');
+      // console.log('✅ Auth loading complete');
     };
     
     initAuth();
@@ -72,13 +72,13 @@ export const AuthProvider = ({ children }) => {
     const response = await axios.post(`${API_URL}/auth/login`, { email, password });
     const { user: userData } = response.data;
     
-    console.log('✅ Login successful:', userData);
+    // console.log('✅ Login successful:', userData);
     
     // Store user data and email in localStorage
     localStorage.setItem('userEmail', email);
     localStorage.setItem('userData', JSON.stringify(userData));
     
-    console.log('✅ Saved to localStorage:', { email, userData });
+    // console.log('✅ Saved to localStorage:', { email, userData });
     
     setUser(userData);
     return response.data;

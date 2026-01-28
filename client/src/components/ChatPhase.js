@@ -219,7 +219,7 @@ const ChatPhase = ({ chatId }) => {
       typeMessage(botResponseText, updatedMessages);
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      // console.error('Error sending message:', error);
       const errorMessage = {
         role: 'assistant',
         content: 'Sorry, I encountered an error. Please try again.',
@@ -262,7 +262,7 @@ const ChatPhase = ({ chatId }) => {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Download error:', error);
+      // console.error('Download error:', error);
       alert('Failed to download report. Please try again.');
     }
   };

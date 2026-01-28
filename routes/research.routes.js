@@ -6,6 +6,8 @@ import {
   getAllSessions,
   retryPhase,
   stopPhase,
+  submitExpectedOutcome,
+  updateExpectedOutcome,
   deleteSession
 } from '../controllers/research.controller.js';
 
@@ -28,6 +30,12 @@ router.post('/:chatId/retry-phase', retryPhase);
 
 // POST /api/research/:chatId/stop-phase - Stop/terminate a phase
 router.post('/:chatId/stop-phase', stopPhase);
+
+// POST /api/research/:chatId/submit-outcome - Submit expected outcome and trigger Phase 6
+router.post('/:chatId/submit-outcome', submitExpectedOutcome);
+
+// POST /api/research/:chatId/update-outcome - Update expected outcome without triggering Phase 6 (for retries)
+router.post('/:chatId/update-outcome', updateExpectedOutcome);
 
 // DELETE /api/research/:chatId - Delete a research session
 router.delete('/:chatId', deleteSession);

@@ -7,3 +7,32 @@ yarn-error.log*
 client/build
 client/node_modules
 .vscode/
+
+# Production
+build/
+dist/
+*.log
+logs/
+
+# PM2
+.pm2/
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Coverage
+coverage/
+
+# Testing
+.nyc_output/

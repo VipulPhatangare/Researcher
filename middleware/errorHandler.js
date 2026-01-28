@@ -2,12 +2,7 @@
  * Global error handling middleware
  */
 const errorHandler = (err, req, res, next) => {
-  console.error('❌ Error occurred:', {
-    message: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method
-  });
+  // console.error('❌ Error occurred:', { message: err.message, stack: err.stack, path: req.path, method: req.method });
 
   // Mongoose validation error
   if (err.name === 'ValidationError') {

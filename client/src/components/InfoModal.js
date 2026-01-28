@@ -13,65 +13,74 @@ const InfoModal = ({ onClose }) => {
         <div className="modal-body">
           <div className="info-content">
             <p>
-              <strong>Researcher</strong> is an intelligent AI-powered research platform designed to streamline 
-              and enhance your academic research journey. Our system guides you through a comprehensive 
-              6-phase research process, transforming your initial problem statement into actionable insights.
+              <strong>Researcher</strong> is an intelligent AI-powered research platform that transforms your problem 
+              statement into comprehensive, research-backed solutions. Our automated system guides you through 
+              6 intelligent phases, leveraging advanced AI to deliver actionable insights and academic resources.
             </p>
 
-            <h3>Research Phases</h3>
+            <h3>How It Works - 6 Phase Process</h3>
             <ul className="phase-list">
               <li>
-                <strong>Phase 1: Problem Understanding & Subtopics (10% Complete)</strong>
-                Analyzes your problem statement and generates relevant subtopics to explore, helping you 
-                understand the scope and dimensions of your research area.
+                <strong>Phase 1: Problem Understanding & Analysis</strong>
+                <br/>Our AI analyzes your problem statement to identify key themes, generates relevant subtopics, 
+                and extracts critical keywords that define your research scope.
+                <br/><em>⏱️ Estimated time: 2-3 minutes</em>
               </li>
 
               <li>
-                <strong>Phase 2: Problem Refinement (25% Complete)</strong>
-                Refines your problem statement with expert-level clarity, creates a vector embedding for 
-                semantic search, and provides structured research direction.
+                <strong>Phase 2: Problem Refinement & Vectorization</strong>
+                <br/>Refines your problem with expert-level clarity, generates semantic embeddings for intelligent 
+                matching, and structures your research direction for optimal discovery.
+                <br/><em>⏱️ Estimated time: 2-3 minutes</em>
               </li>
 
               <li>
-                <strong>Phase 3: Literature Discovery (55% Complete)</strong>
-                Searches and retrieves relevant research papers from academic databases, providing you 
-                with a curated collection of scholarly resources directly related to your refined problem.
+                <strong>Phase 3: Literature Discovery & Retrieval</strong>
+                <br/>Automatically searches academic databases and retrieves highly relevant research papers, 
+                filtered by relevance, recency, and impact factor to ensure quality sources.
+                <br/><em>⏱️ Estimated time: 2-3 minutes</em>
               </li>
 
               <li>
-                <strong>Phase 4: Research Gap Analysis (70% Complete)</strong>
-                Identifies gaps in existing research by analyzing methodologies, technologies, and datasets. 
-                Highlights opportunities for novel contributions in your field.
+                <strong>Phase 4: Solution Synthesis & Recommendations</strong>
+                <br/>Analyzes retrieved papers to extract methodologies, patterns, and trends. Delivers a comprehensive 
+                solution with architecture, implementation workflow, tech stack recommendations, and datasets.
+                <br/><em>⏱️ Estimated time: 4-5 minutes</em>
               </li>
 
               <li>
-                <strong>Phase 5: Existing Solutions (85% Complete)</strong>
-                Explores current solutions and approaches in your research domain, helping you understand 
-                what has been tried and what remains unexplored.
+                <strong>Phase 5: Interactive Research Chat</strong>
+                <br/>AI-powered chat assistant that answers follow-up questions, provides clarifications, and offers 
+                deeper insights based on your complete research context. Available immediately after Phase 4.
+                <br/><em>⏱️ Always available</em>
               </li>
 
               <li>
-                <strong>Phase 6: Future Scope & Recommendations (100% Complete)</strong>
-                Provides strategic recommendations for future research directions, potential applications, 
-                and areas that warrant further investigation based on identified gaps.
+                <strong>Phase 6: Solution Refinement (Optional)</strong>
+                <br/>If the initial solution doesn't meet your expected outcome, provide your requirements and the 
+                system intelligently refines the solution with focused re-analysis and enhanced recommendations.
+                <br/><em>⏱️ Estimated time: 4-5 minutes</em>
               </li>
             </ul>
-
-            <h3>Research Chat Assistant</h3>
-            <p>
-              After completing the 6 phases, you can use our <strong>Research Chat</strong> feature to:
+            
+            <p style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#e6f3ff', borderRadius: '6px', fontSize: '0.95rem' }}>
+              <strong>📊 Total Time:</strong> 10-14 minutes for complete research cycle | <strong>💾 Auto-save:</strong> All progress saved in your browser
             </p>
+
+            <h3>Key Features</h3>
             <ul style={{ listStyle: 'disc', paddingLeft: '2rem', marginBottom: '1rem' }}>
-              <li>Ask follow-up questions about your research findings</li>
-              <li>Request clarifications on specific methodologies or datasets</li>
-              <li>Explore alternative approaches and perspectives</li>
-              <li>Dive deeper into particular aspects of your research</li>
-              <li>Maintain multiple chat sessions for different topics</li>
+              <li><strong>Parallel Processing:</strong> Multiple phases run simultaneously for faster results</li>
+              <li><strong>Smart Retry:</strong> Refine solutions that don't meet your expectations</li>
+              <li><strong>Academic Sources:</strong> Access to research papers from trusted databases</li>
+              <li><strong>Export Options:</strong> Download reports in PDF or structured formats</li>
+              <li><strong>Session Management:</strong> Maintain multiple research sessions with automatic saving</li>
+              <li><strong>Real-time Chat:</strong> Interactive AI assistant available throughout your research journey</li>
             </ul>
 
+            <h3>Best For</h3>
             <p>
-              Each chat session is preserved in your browser, allowing you to revisit previous conversations 
-              and continue your research exploration anytime.
+              Students, researchers, academics, and industry professionals conducting literature reviews, 
+              exploring research problems, seeking implementation guidance, or developing research proposals.
             </p>
           </div>
         </div>

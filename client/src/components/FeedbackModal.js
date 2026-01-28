@@ -22,53 +22,53 @@ const FeedbackModal = ({ isOpen, onClose }) => {
   const questions = [
     {
       id: 'q1',
-      text: 'How clearly did the system understand your research problem statement?',
-      subtitle: '(1 = Not clear at all, 5 = Completely accurate)'
+      text: '🎯 How well did the system understand your research problem?',
+      subtitle: '(1 = Completely missed the point, 5 = Perfectly understood)'
     },
     {
       id: 'q2',
-      text: 'How useful were the generated keywords and subtopics in defining your research direction?',
-      subtitle: '(1 = Not useful, 5 = Extremely useful)'
+      text: '🔑 How useful were the generated keywords and subtopics?',
+      subtitle: '(1 = Not relevant, 5 = Extremely useful for defining research direction)'
     },
     {
       id: 'q3',
-      text: 'How relevant were the retrieved research papers to your topic?',
-      subtitle: '(1 = Poor match, 5 = Highly relevant and on-topic)'
+      text: '📚 How relevant were the retrieved research papers?',
+      subtitle: '(1 = Off-topic papers, 5 = Highly relevant and directly applicable)'
     },
     {
       id: 'q4',
-      text: 'How satisfied are you with the organization and filtering of papers (relevance, recency, impact)?',
-      subtitle: '(1 = Not satisfied, 5 = Very satisfied)'
+      text: '📊 How satisfied are you with paper organization and filtering?',
+      subtitle: '(1 = Poor organization, 5 = Well-filtered by relevance, recency, and impact)'
     },
     {
       id: 'q5',
-      text: 'How helpful was the methodology and pattern extraction in understanding research trends?',
-      subtitle: '(1 = Not helpful, 5 = Very helpful)'
+      text: '🔬 How helpful was the methodology and pattern extraction?',
+      subtitle: '(1 = Not insightful, 5 = Very helpful in understanding research trends)'
     },
     {
       id: 'q6',
-      text: 'How effectively did the system synthesize insights into a final structured solution?',
-      subtitle: '(1 = Not effective, 5 = Highly effective)'
+      text: '✨ How effective was the final solution synthesis?',
+      subtitle: '(1 = Incomplete/unclear, 5 = Comprehensive and actionable solution)'
     },
     {
       id: 'q7',
-      text: 'How easy was it to interact with the chatbot for follow-up questions and clarifications?',
-      subtitle: '(1 = Difficult/confusing, 5 = Very easy and intuitive)'
+      text: '💬 How easy was it to use the research chat assistant?',
+      subtitle: '(1 = Confusing and difficult, 5 = Very intuitive and helpful)'
     },
     {
       id: 'q8',
-      text: 'How would you rate the accuracy and honesty of system responses (avoiding hallucination)?',
-      subtitle: '(1 = Inaccurate/Speculative responses, 5 = Highly accurate and grounded)'
+      text: '✅ How accurate and reliable were the AI responses?',
+      subtitle: '(1 = Inaccurate/speculative, 5 = Highly accurate and fact-based)'
     },
     {
       id: 'q9',
-      text: 'How valuable do you think this system is for real research use (students, researchers, industry)?',
-      subtitle: '(1 = Low value, 5 = High practical value)'
+      text: '💡 How valuable is this tool for real research work?',
+      subtitle: '(1 = Limited value, 5 = High practical value for students/researchers)'
     },
     {
       id: 'q10',
-      text: 'How likely are you to continue using this tool or recommend it to others?',
-      subtitle: '(1 = Not likely, 5 = Definitely will)'
+      text: '⭐ How likely are you to recommend this platform?',
+      subtitle: '(1 = Would not recommend, 5 = Definitely will recommend to others)'
     }
   ];
 
@@ -82,7 +82,7 @@ const FeedbackModal = ({ isOpen, onClose }) => {
             const data = await response.json();
             setAlreadySubmitted(data.hasSubmitted);
           } catch (error) {
-            console.error('Error checking feedback status:', error);
+            // console.error('Error checking feedback status:', error);
           }
         }
       }
@@ -139,7 +139,7 @@ const FeedbackModal = ({ isOpen, onClose }) => {
         alert('Failed to submit feedback. Please try again.');
       }
     } catch (error) {
-      console.error('Error submitting feedback:', error);
+      // console.error('Error submitting feedback:', error);
       alert('Failed to submit feedback. Please try again.');
     }
   };
@@ -162,9 +162,12 @@ const FeedbackModal = ({ isOpen, onClose }) => {
       <div className="feedback-overlay" onClick={handleClose}>
         <div className="feedback-modal feedback-success" onClick={(e) => e.stopPropagation()}>
           <div className="success-content">
-            <div className="success-icon">ℹ</div>
-            <h2>Already Submitted</h2>
-            <p>You have already submitted your feedback. Thank you!</p>
+            <div className="success-icon">✓</div>
+            <h2>Feedback Already Received</h2>
+            <p>Thank you for your valuable feedback! You've already submitted your response.</p>
+            <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+              Your input helps us continuously improve the research platform.
+            </p>
             <button onClick={handleClose} className="close-btn">Close</button>
           </div>
         </div>
@@ -177,9 +180,12 @@ const FeedbackModal = ({ isOpen, onClose }) => {
       <div className="feedback-overlay" onClick={handleClose}>
         <div className="feedback-modal feedback-success" onClick={(e) => e.stopPropagation()}>
           <div className="success-content">
-            <div className="success-icon">✓</div>
-            <h2>Thank You!</h2>
-            <p>Your feedback has been submitted successfully.</p>
+            <div className="success-icon">🎉</div>
+            <h2>Feedback Submitted Successfully!</h2>
+            <p>Thank you for taking the time to share your experience.</p>
+            <p style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+              Your insights help us build a better research platform for everyone.
+            </p>
           </div>
         </div>
       </div>
@@ -190,13 +196,19 @@ const FeedbackModal = ({ isOpen, onClose }) => {
     <div className="feedback-overlay" onClick={handleClose}>
       <div className="feedback-modal" onClick={(e) => e.stopPropagation()}>
         <div className="feedback-header">
-          <h2>Research System Feedback</h2>
+          <h2>📝 Help Us Improve</h2>
           <button className="feedback-close" onClick={handleClose}>×</button>
         </div>
 
         <form onSubmit={handleSubmit} className="feedback-form">
           <div className="feedback-intro">
-            <p>Please rate your experience with our research system. All questions are required.</p>
+            <p>
+              <strong>Your feedback drives our improvement!</strong> Please take 2-3 minutes to rate your 
+              experience across all research phases. This helps us enhance the platform for researchers like you.
+            </p>
+            <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: '#666' }}>
+              All questions are required • Rate from 1 (Poor) to 5 (Excellent)
+            </p>
           </div>
 
           <div className="feedback-questions">
@@ -231,11 +243,11 @@ const FeedbackModal = ({ isOpen, onClose }) => {
 
           <div className="feedback-textarea-section">
             <label className="textarea-label">
-              Additional Comments or Suggestions (Optional)
+              💭 Additional Comments or Suggestions (Optional)
             </label>
             <textarea
               className="feedback-textarea"
-              placeholder="Share your thoughts, suggestions, or any specific issues you encountered..."
+              placeholder="Help us improve! Share your thoughts on what worked well, what needs improvement, feature suggestions, or any specific issues you encountered during your research journey..."
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
               rows={6}

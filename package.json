@@ -8,7 +8,15 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "client": "cd client && npm start",
-    "dev:full": "concurrently \"npm run dev\" \"npm run client\""
+    "dev:full": "concurrently \"npm run dev\" \"npm run client\"",
+    "build:client": "cd client && npm install && npm run build",
+    "install:all": "npm install && cd client && npm install",
+    "deploy": "npm run build:client && pm2 restart ecosystem.config.js --env production",
+    "pm2:start": "pm2 start ecosystem.config.js --env production",
+    "pm2:stop": "pm2 stop researcher-backend",
+    "pm2:restart": "pm2 restart researcher-backend",
+    "pm2:logs": "pm2 logs researcher-backend",
+    "pm2:monitor": "pm2 monit"
   },
   "keywords": [
     "ai",

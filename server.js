@@ -20,9 +20,6 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB
-connectDB();
-
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -55,13 +52,37 @@ if (process.env.NODE_ENV === 'production') {
 // Error handling middleware
 app.use(errorHandler);
 
-// Start server
-app.listen(PORT, () => {
-  // Server started successfully
-});
+// Connect to MongoDB and start server
+const startServer = async () => {
+  try {
+    // Try to connect to database (but don't fail if it doesn't connect)
+    const dbConnection = await connectDB();
+    
+    if (!dbConnection) {
+      // console.warn('⚠️ Starting server WITHOUT database connection');
+      // console.warn('⚠️ API endpoints requiring database will fail');
+    }
+    
+    // Start server regardless of database connection
+    app.listen(PORT, () => {
+      // console.log(`\n${'='.repeat(50)}`);
+      // console.log(`🚀 Server running on port ${PORT}`);
+      // console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+      // console.log(`🌐 Local URL: http://localhost:${PORT}`);
+      // console.log(`📊 Database: ${dbConnection ? '✅ Connected' : '❌ Disconnected'}`);
+      // console.log(`${'='.repeat(50)}\n`);
+    });
+  } catch (error) {
+    // console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err);
+  // console.error('❌ Unhandled Rejection:', err);
   process.exit(1);
 });

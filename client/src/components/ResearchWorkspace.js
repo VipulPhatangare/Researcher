@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getSessionStatus, getSessionDetails, retryPhase } from '../services/api';
+import { getSessionStatus, getSessionDetails, retryPhase, stopPhase, submitExpectedOutcome, updateExpectedOutcome } from '../services/api';
 import PhaseContent from './PhaseContent';
 import Modal from './Modal';
 import './ResearchWorkspace.css';
@@ -14,10 +14,15 @@ const ResearchWorkspace = () => {
   const [error, setError] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [retryingPhase, setRetryingPhase] = useState(null);
+  const [stoppingPhase, setStoppingPhase] = useState(null);
   const [showResumeModal, setShowResumeModal] = useState(false);
   const [resumePhase, setResumePhase] = useState(null);
   const [alertModal, setAlertModal] = useState({ isOpen: false, title: '', message: '', type: 'info' });
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, phaseNumber: null });
+  const [showOutcomeModal, setShowOutcomeModal] = useState(false);
+  const [expectedOutcome, setExpectedOutcome] = useState('');
+  const [submittingOutcome, setSubmittingOutcome] = useState(false);
+  const [pendingRetry, setPendingRetry] = useState(null); // Stores {phaseNumber, shouldDelete} for Phase 6 retry
 
   useEffect(() => {
     if (!chatId) {
@@ -44,10 +49,33 @@ const ResearchWorkspace = () => {
           setShowResumeModal(true);
           sessionStorage.setItem(modalShownKey, 'true');
         }
+      } else {
+        // If modal was already shown but all phases are now working, clear the flag
+        const failedPhase = findFirstFailedPhase();
+        if (!failedPhase) {
+          sessionStorage.removeItem(modalShownKey);
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionData, loading]);
+
+  // Check if Phase 5 is completed and Phase 6 not started - show expected outcome modal
+  useEffect(() => {
+    if (sessionData && sessionData.details && sessionData.details.phases && !loading && !pendingRetry) {
+      const phase5Status = sessionData.details.phases.phase5?.status;
+      const phase6Status = sessionData.details.phases.phase6?.status;
+      const hasExpectedOutcome = sessionData.details.expectedOutcome;
+
+      // Show modal only if Phase 5 is completed, Phase 6 is pending, and no expected outcome has been submitted
+      // Also don't show if we're in the middle of a retry flow
+      if (phase5Status === 'completed' && phase6Status === 'pending' && !hasExpectedOutcome) {
+        setShowOutcomeModal(true);
+      } else if (hasExpectedOutcome && phase6Status !== 'pending') {
+        setShowOutcomeModal(false);
+      }
+    }
+  }, [sessionData, loading, pendingRetry]);
 
   const fetchSessionData = async () => {
     try {
@@ -77,15 +105,28 @@ const ResearchWorkspace = () => {
     
     const phases = sessionData.details.phases;
     
-    for (let i = 1; i <= 6; i++) {
-      const phaseKey = `phase${i}`;
-      const phaseData = phases[phaseKey];
+    // Map frontend phase numbers to backend phase keys
+    // Frontend: 1,2,3,4,5,6,7 → Backend: phase1,phase2,phase3,phase4,phase5,phase6,Chat
+    // NOTE: Phase 7 is Chat and doesn't have traditional completion status - exclude it
+    const phaseMapping = [
+      { frontend: 1, backend: 'phase1' },
+      { frontend: 2, backend: 'phase2' },
+      { frontend: 3, backend: 'phase3' },
+      { frontend: 4, backend: 'phase4' },  // Gap Finder
+      { frontend: 5, backend: 'phase5' },  // Literature Review
+      { frontend: 6, backend: 'phase6' }   // Best Solution
+      // Phase 7 (Chat) is excluded as it's always available
+    ];
+    
+    for (let i = 0; i < phaseMapping.length; i++) {
+      const { frontend, backend } = phaseMapping[i];
+      const phaseData = phases[backend];
       const phaseStatus = phaseData?.status;
       const startedAt = phaseData?.startedAt;
       
       // If phase explicitly failed
       if (phaseStatus === 'failed') {
-        return i;
+        return frontend;
       }
       
       // If phase is stuck in "processing" for too long (more than 20 minutes)
@@ -96,16 +137,18 @@ const ResearchWorkspace = () => {
         
         // Phase stuck for more than 20 minutes
         if (minutesElapsed > 20) {
-          return i;
+          return frontend;
         }
       }
       
-      // If previous phase completed but current phase never started (stuck)
-      if (i > 1) {
-        const prevPhaseKey = `phase${i - 1}`;
-        const prevPhaseStatus = phases[prevPhaseKey]?.status;
-        if (prevPhaseStatus === 'completed' && phaseStatus === 'pending') {
-          return i;
+      // If previous phase completed but current phase was started and is now stuck in pending
+      // (Only if it was started before - has startedAt timestamp)
+      if (i > 0) {
+        const prevBackend = phaseMapping[i - 1].backend;
+        const prevPhaseStatus = phases[prevBackend]?.status;
+        if (prevPhaseStatus === 'completed' && phaseStatus === 'pending' && startedAt) {
+          // Phase was started but is now back to pending (likely stopped/failed)
+          return frontend;
         }
       }
     }
@@ -120,14 +163,17 @@ const ResearchWorkspace = () => {
     setRetryingPhase(resumePhase);
     setSelectedPhase(resumePhase);
 
+    // Frontend phase number equals backend phase number now (no conversion needed)
+    const backendPhaseNumber = resumePhase;
+
     // First, mark stale processing phase as failed in backend
-    const phaseData = sessionData?.details?.phases?.[`phase${resumePhase}`];
+    const phaseData = sessionData?.details?.phases?.[`phase${backendPhaseNumber}`];
     if (phaseData?.status === 'processing') {
       // The retry will handle marking it properly
     }
 
     try {
-      await retryPhase(chatId, resumePhase, false); // Don't delete existing data
+      await retryPhase(chatId, backendPhaseNumber, false); // Don't delete existing data
       fetchSessionData();
     } catch (err) {
       setError(`Failed to resume Phase ${resumePhase}: ${err.message}`);
@@ -180,8 +226,16 @@ const ResearchWorkspace = () => {
   const { status, details } = sessionData;
 
   const getPhaseStatus = (phaseNum) => {
-    const phaseKey = `phase${phaseNum}`;
-    return details?.phases?.[phaseKey]?.status || 'pending';
+    // Map frontend phase numbers to backend phase keys
+    // Frontend: 1,2,3,4,5,6,7 → Backend: phase1,phase2,phase3,phase4,phase5,phase6,chat
+    let backendPhaseKey;
+    if (phaseNum === 7) {
+      backendPhaseKey = 'phase7'; // Frontend Phase 7 → Chat phase
+    } else {
+      backendPhaseKey = `phase${phaseNum}`;
+    }
+    
+    return details?.phases?.[backendPhaseKey]?.status || 'pending';
   };
 
   const canOpenPhase = (phaseNum) => {
@@ -195,8 +249,8 @@ const ResearchWorkspace = () => {
   };
 
   const handlePhaseClick = (phaseNum) => {
-    // Phase 7 (Chat) should always open directly without any modal
-    if (phaseNum === 7) {
+    // Phase 6 (Chat) should always open directly without any modal
+    if (phaseNum === 6) {
       setSelectedPhase(phaseNum);
       setSidebarOpen(false);
       return;
@@ -229,20 +283,39 @@ const ResearchWorkspace = () => {
   };
 
   const handleRetryPhase = async (phaseNumber) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Delete Existing Data?',
-      message: `Do you want to DELETE existing data for Phase ${phaseNumber}?\n\n• Click "Delete & Restart" to DELETE existing data and start fresh\n• Click "Keep & Merge" to KEEP existing data and merge with new results`,
-      onConfirm: (shouldDelete) => executeRetryPhase(phaseNumber, shouldDelete),
-      phaseNumber
-    });
+    // For Phase 6, show expected outcome modal first
+    if (phaseNumber === 6) {
+      setConfirmModal({
+        isOpen: true,
+        title: 'Delete Existing Data?',
+        message: `Do you want to DELETE existing data for Phase ${phaseNumber}?\n\n• Click "Delete & Restart" to DELETE existing data and start fresh\n• Click "Keep & Merge" to KEEP existing data and merge with new results`,
+        onConfirm: (shouldDelete) => {
+          // Store the retry action and show outcome modal
+          setPendingRetry({ phaseNumber: 6, shouldDelete });
+          setExpectedOutcome(''); // Clear previous outcome
+          setShowOutcomeModal(true);
+        },
+        phaseNumber
+      });
+    } else {
+      setConfirmModal({
+        isOpen: true,
+        title: 'Delete Existing Data?',
+        message: `Do you want to DELETE existing data for Phase ${phaseNumber}?\n\n• Click "Delete & Restart" to DELETE existing data and start fresh\n• Click "Keep & Merge" to KEEP existing data and merge with new results`,
+        onConfirm: (shouldDelete) => executeRetryPhase(phaseNumber, shouldDelete),
+        phaseNumber
+      });
+    }
   };
 
   const executeRetryPhase = async (phaseNumber, shouldDelete) => {
     setRetryingPhase(phaseNumber);
 
+    // Frontend phase number equals backend phase number now (no conversion needed)
+    const backendPhaseNumber = phaseNumber;
+
     try {
-      await retryPhase(chatId, phaseNumber, shouldDelete);
+      await retryPhase(chatId, backendPhaseNumber, shouldDelete);
       setAlertModal({
         isOpen: true,
         title: 'Retry Initiated',
@@ -262,12 +335,106 @@ const ResearchWorkspace = () => {
     }
   };
 
+  const handleStopPhase = async (phaseNumber) => {
+    setStoppingPhase(phaseNumber);
+    
+    try {
+      // console.log('Attempting to stop phase:', phaseNumber);
+      await stopPhase(chatId, phaseNumber);
+      setAlertModal({
+        isOpen: true,
+        title: 'Phase Stopped',
+        message: `Phase ${phaseNumber} has been stopped successfully.`,
+        type: 'success'
+      });
+      fetchSessionData(); // Refresh data
+    } catch (err) {
+      // console.error('Stop phase error:', err);
+      setAlertModal({
+        isOpen: true,
+        title: 'Stop Failed',
+        message: err.message || `Failed to stop Phase ${phaseNumber}`,
+        type: 'error'
+      });
+    } finally {
+      setStoppingPhase(null);
+    }
+  };
+
+  const handleSubmitOutcome = async () => {
+    const trimmedOutcome = expectedOutcome.trim();
+    
+    if (!trimmedOutcome || trimmedOutcome.length === 0) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Input Required',
+        message: 'Please enter your expected outcome or type "NA" or "No" if you have no specific expectations.',
+        type: 'error'
+      });
+      return;
+    }
+
+    // Count words
+    const wordCount = trimmedOutcome.split(/\s+/).filter(word => word.length > 0).length;
+    if (wordCount > 200) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Word Limit Exceeded',
+        message: `Your input contains ${wordCount} words. Please limit it to 200 words or less.`,
+        type: 'error'
+      });
+      return;
+    }
+
+    setSubmittingOutcome(true);
+    
+    try {
+      // Check if this is for a retry or normal Phase 6 trigger
+      if (pendingRetry) {
+        // For retry: Update outcome without triggering Phase 6, then call retry
+        await updateExpectedOutcome(chatId, trimmedOutcome);
+        // Then execute the retry which will use the updated outcome
+        await retryPhase(chatId, pendingRetry.phaseNumber, pendingRetry.shouldDelete);
+        setShowOutcomeModal(false);
+        setExpectedOutcome('');
+        setPendingRetry(null);
+        setAlertModal({
+          isOpen: true,
+          title: 'Retry Initiated',
+          message: 'Phase 6 retry initiated with your new expected outcome! The page will update automatically.',
+          type: 'success'
+        });
+      } else {
+        // Normal Phase 6 trigger after Phase 5 (this will auto-trigger Phase 6)
+        await submitExpectedOutcome(chatId, trimmedOutcome);
+        setShowOutcomeModal(false);
+        setExpectedOutcome('');
+        setAlertModal({
+          isOpen: true,
+          title: 'Success',
+          message: 'Thank you! Phase 6 will now generate the best solution based on your expectations.',
+          type: 'success'
+        });
+      }
+      fetchSessionData(); // Refresh to show Phase 6 starting
+    } catch (err) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Submission Failed',
+        message: err.message || 'Failed to submit expected outcome. Please try again.',
+        type: 'error'
+      });
+    } finally {
+      setSubmittingOutcome(false);
+    }
+  };
+
   const phases = [
-    { number: 1, title: 'Prompt Enhancement', icon: '✨', estimatedTime: '30-60s' },
+    { number: 1, title: 'Prompt Enhancement', icon: '✨', estimatedTime: '2-3 min' },
     { number: 2, title: 'Research Discovery', icon: '🔍', estimatedTime: '2-3 min' },
-    { number: 3, title: 'Analysis & Synthesis', icon: '📊', estimatedTime: '7-8 min' },
-    { number: 4, title: 'Research Analysis', icon: '🧪', estimatedTime: '2-3 min' },
-    { number: 5, title: 'Existing Solutions', icon: '🔧', estimatedTime: '2-3 min' },
+    { number: 3, title: 'Analysis & Synthesis', icon: '📊', estimatedTime: '2-3 min' },
+    { number: 4, title: 'Gap Finder', icon: '🔎', estimatedTime: '2-3 min' },
+    { number: 5, title: 'Literature Review', icon: '📚', estimatedTime: '2-3 min' },
     { number: 6, title: 'Best Solution', icon: '🏆', estimatedTime: '4-5 min' },
     { number: 7, title: 'Research Chat', icon: '💬', estimatedTime: 'Always Available' }
   ];
@@ -321,6 +488,86 @@ const ResearchWorkspace = () => {
                 {sessionData?.details?.phases?.[`phase${resumePhase}`]?.status === 'processing'
                   ? 'Terminate & Restart'
                   : 'Resume from Phase ' + resumePhase}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expected Outcome Modal - Mandatory after Phase 5 */}
+      {showOutcomeModal && (
+        <div className="modal-overlay" style={{ pointerEvents: 'all' }}>
+          <div className="modal-card resume-modal" style={{ maxWidth: '600px' }}>
+            <div className="modal-header" style={{ backgroundColor: '#667eea' }}>
+              <h2 className="modal-title" style={{ color: 'white' }}>
+                📝 Expected Outcome Required
+              </h2>
+            </div>
+            <div className="modal-body">
+              <p className="resume-message" style={{ marginBottom: '20px' }}>
+                {pendingRetry 
+                  ? 'Before retrying Phase 6, please provide your expected outcome for the solution. This will help generate a better result tailored to your needs.'
+                  : 'Phase 5 (Literature Review) has been completed successfully! Before generating the best solution in Phase 6, please tell us what kind of outcome you\'re expecting from this research.'}
+              </p>
+              <p style={{ marginBottom: '15px', fontWeight: '600', color: '#2d3748' }}>
+                What kind of solution or outcome are you looking for? <span style={{ color: '#e53e3e' }}>*</span>
+              </p>
+              <textarea
+                value={expectedOutcome}
+                onChange={(e) => setExpectedOutcome(e.target.value)}
+                placeholder="Describe your expected outcome or solution approach here... (If no specific expectation, type 'NA' or 'No')"
+                style={{
+                  width: '100%',
+                  minHeight: '150px',
+                  padding: '12px',
+                  border: '2px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontFamily: 'inherit',
+                  resize: 'vertical',
+                  marginBottom: '10px'
+                }}
+                maxLength={2000}
+              />
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                fontSize: '13px',
+                color: '#718096'
+              }}>
+                <span>
+                  {expectedOutcome.trim().split(/\s+/).filter(w => w.length > 0).length} / 200 words
+                </span>
+                <span style={{ fontStyle: 'italic' }}>
+                  * Maximum 200 words
+                </span>
+              </div>
+              <div style={{
+                marginTop: '15px',
+                padding: '12px',
+                backgroundColor: '#edf2f7',
+                borderRadius: '6px',
+                fontSize: '13px',
+                color: '#4a5568'
+              }}>
+                <strong>Note:</strong> If you don't have any specific expectations or outcome in mind, 
+                simply type <strong>"NA"</strong> or <strong>"No"</strong> to continue.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="form-button form-button-primary"
+                onClick={handleSubmitOutcome}
+                disabled={submittingOutcome}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  fontWeight: '600'
+                }}
+              >
+                {submittingOutcome ? '⏳ Submitting...' : '✅ Submit & Start Phase 6'}
               </button>
             </div>
           </div>
@@ -428,6 +675,14 @@ const ResearchWorkspace = () => {
                   {status.overallStatus}
                 </span>
               </span>
+              <span className="meta-item">
+                <strong>Total Time:</strong> 15-20 min (Phases 1-6)
+              </span>
+              {selectedPhase <= 6 && (
+                <span className="meta-item">
+                  <strong>Current Phase Time:</strong> {phases[selectedPhase - 1].estimatedTime}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -439,6 +694,8 @@ const ResearchWorkspace = () => {
             chatId={chatId}
             onRetry={handleRetryPhase}
             isRetrying={retryingPhase === selectedPhase}
+            onStop={handleStopPhase}
+            isStopping={stoppingPhase === selectedPhase}
           />
         </div>
       </div>

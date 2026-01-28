@@ -82,10 +82,13 @@ export const generatePDFReport = async (req, res) => {
 
     // ========== PHASE 2: RESEARCH DISCOVERY ==========
     if (doc.y > 650) doc.addPage();
-    addPhaseHeader(doc, 2, 'Research Discovery - Academic Papers');
+    addPhaseHeader(doc, 2, 'Research Discovery - Academic Papers, GitHub Projects & Applications');
     
+    // === ACADEMIC PAPERS ===
     if (session.papers && session.papers.length > 0) {
-      doc.fontSize(12).fillColor('#2d3748').text(`Total Papers Found: ${session.papers.length}`, { underline: true });
+      doc.fontSize(14).fillColor('#1a365d').font('Helvetica-Bold').text('📄 Academic Papers', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(12).fillColor('#2d3748').font('Helvetica').text(`Total Papers Found: ${session.papers.length}`);
       doc.moveDown();
 
       session.papers.slice(0, 15).forEach((paper, index) => {
@@ -121,17 +124,151 @@ export const generatePDFReport = async (req, res) => {
       doc.fontSize(10).fillColor('#718096').text('No papers found in this phase.');
     }
 
+    // === GITHUB PROJECTS ===
+    if (doc.y > 650) doc.addPage();
+    doc.fontSize(14).fillColor('#1a365d').font('Helvetica-Bold').text('💻 GitHub Projects', { underline: true });
+    doc.moveDown(0.5);
+    
+    if (session.githubProjects && session.githubProjects.length > 0) {
+      doc.fontSize(12).fillColor('#2d3748').font('Helvetica').text(`Total GitHub Projects Found: ${session.githubProjects.length}`);
+      doc.moveDown();
+
+      session.githubProjects.slice(0, 10).forEach((project, index) => {
+        doc.fontSize(11).fillColor('#1a365d').font('Helvetica-Bold')
+           .text(`${index + 1}. ${project.name || project.full_name || 'Untitled Project'}`, { continued: false });
+        
+        doc.fontSize(9).fillColor('#4a5568').font('Helvetica');
+        
+        if (project.full_name) {
+          doc.text(`Repository: ${project.full_name}`, { indent: 20 });
+        }
+        
+        if (project.stargazers_count !== undefined) {
+          doc.text(`⭐ Stars: ${project.stargazers_count} | 🍴 Forks: ${project.forks_count || 0}`, { indent: 20 });
+        }
+        
+        if (project.language) {
+          doc.text(`Language: ${project.language}`, { indent: 20 });
+        }
+        
+        if (project.html_url) {
+          doc.fillColor('#3182ce').text(`URL: ${project.html_url}`, { indent: 20, link: project.html_url });
+          doc.fillColor('#4a5568');
+        }
+
+        if (project.description) {
+          doc.fontSize(9).fillColor('#000000')
+             .text(project.description.substring(0, 250) + (project.description.length > 250 ? '...' : ''), { align: 'justify', indent: 20 });
+        }
+        
+        if (project.topics && project.topics.length > 0) {
+          doc.fontSize(8).fillColor('#4a5568').text(`Topics: ${project.topics.slice(0, 5).join(', ')}`, { indent: 20 });
+        }
+
+        doc.moveDown(0.8);
+
+        if (doc.y > 720 && index < session.githubProjects.slice(0, 10).length - 1) {
+          doc.addPage();
+        }
+      });
+    } else {
+      doc.fontSize(10).fillColor('#718096').text('No GitHub projects found.');
+    }
+
+    // === APPLICATIONS ===
+    if (doc.y > 650) doc.addPage();
+    doc.fontSize(14).fillColor('#1a365d').font('Helvetica-Bold').text('🚀 Existing Applications', { underline: true });
+    doc.moveDown(0.5);
+    
+    if (session.applications && session.applications.length > 0) {
+      doc.fontSize(12).fillColor('#2d3748').font('Helvetica').text(`Total Applications Found: ${session.applications.length}`);
+      doc.moveDown();
+
+      session.applications.forEach((app, index) => {
+        doc.fontSize(11).fillColor('#1a365d').font('Helvetica-Bold')
+           .text(`${index + 1}. ${app.title || 'Untitled Application'}`, { continued: false });
+        
+        doc.fontSize(9).fillColor('#000000').font('Helvetica');
+        
+        if (app.summary) {
+          doc.text(app.summary, { align: 'justify', indent: 20 });
+          doc.moveDown(0.3);
+        }
+
+        if (app.features && app.features.length > 0) {
+          doc.fontSize(9).fillColor('#4a5568').text('Key Features:', { indent: 20 });
+          app.features.slice(0, 5).forEach(feature => {
+            doc.fontSize(8).fillColor('#000000').text(`• ${feature}`, { indent: 30 });
+          });
+          doc.moveDown(0.3);
+        }
+        
+        if (app.limitations && app.limitations.length > 0) {
+          doc.fontSize(9).fillColor('#4a5568').text('Limitations:', { indent: 20 });
+          app.limitations.slice(0, 3).forEach(limitation => {
+            doc.fontSize(8).fillColor('#000000').text(`• ${limitation}`, { indent: 30 });
+          });
+          doc.moveDown(0.3);
+        }
+
+        if (app.targetUsers) {
+          doc.fontSize(9).fillColor('#4a5568').text(`Target Users: ${app.targetUsers}`, { indent: 20 });
+        }
+
+        if (app.platformType) {
+          doc.fontSize(9).fillColor('#4a5568').text(`Platform: ${app.platformType}`, { indent: 20 });
+        }
+        
+        if (app.officialWebsite) {
+          doc.fillColor('#3182ce').text(`Website: ${app.officialWebsite}`, { indent: 20, link: app.officialWebsite });
+          doc.fillColor('#4a5568');
+        }
+        
+        if (app.pricingOrLicense) {
+          doc.fontSize(9).fillColor('#4a5568').text(`Pricing/License: ${app.pricingOrLicense}`, { indent: 20 });
+        }
+
+        doc.moveDown(0.8);
+
+        if (doc.y > 700 && index < session.applications.length - 1) {
+          doc.addPage();
+        }
+      });
+      
+      if (session.applicationsNotes) {
+        doc.moveDown();
+        doc.fontSize(11).fillColor('#2d3748').text('Additional Notes:', { underline: true });
+        doc.fontSize(9).fillColor('#000000').text(session.applicationsNotes, { align: 'justify' });
+      }
+    } else {
+      doc.fontSize(10).fillColor('#718096').text('No applications found.');
+    }
+
     // ========== PHASE 3: ANALYSIS & SYNTHESIS ==========
     if (doc.y > 650) doc.addPage();
     addPhaseHeader(doc, 3, 'Deep Analysis & Synthesis');
     
-    const analyzedPapers = session.papers.filter(p => p.summary || p.methodology);
+    // === RESEARCH PAPER ANALYSIS ===
+    doc.fontSize(14).fillColor('#1a365d').font('Helvetica-Bold').text('📄 Research Paper Analysis', { underline: true });
+    doc.moveDown(0.5);
     
-    if (analyzedPapers.length > 0) {
-      doc.fontSize(12).fillColor('#2d3748').text(`Papers Analyzed: ${analyzedPapers.length}`, { underline: true });
+    // Try to get analysis data from phase3 data structure first
+    const phase3PaperData = session.phases?.phase3?.researchPaperAnalysis?.data;
+    let paperAnalysisToShow = [];
+    
+    if (phase3PaperData && Array.isArray(phase3PaperData) && phase3PaperData.length > 0) {
+      // Use phase3 stored data
+      paperAnalysisToShow = phase3PaperData.filter(p => p.summary || p.methodology || p.result);
+    } else {
+      // Fallback to enriched papers
+      paperAnalysisToShow = session.papers.filter(p => p.summary || p.methodology);
+    }
+    
+    if (paperAnalysisToShow.length > 0) {
+      doc.fontSize(12).fillColor('#2d3748').font('Helvetica').text(`Papers Analyzed: ${paperAnalysisToShow.length}`);
       doc.moveDown();
 
-      analyzedPapers.slice(0, 10).forEach((paper, index) => {
+      paperAnalysisToShow.slice(0, 10).forEach((paper, index) => {
         doc.fontSize(11).fillColor('#1a365d').font('Helvetica-Bold')
            .text(`${index + 1}. ${paper.title || 'Untitled'}`, { continued: false });
         
@@ -139,133 +276,121 @@ export const generatePDFReport = async (req, res) => {
         
         if (paper.summary) {
           doc.text('Summary:', { underline: true, indent: 20 });
-          doc.fontSize(9).fillColor('#000000').text(paper.summary, { align: 'justify', indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(paper.summary.substring(0, 500) + (paper.summary.length > 500 ? '...' : ''), { align: 'justify', indent: 20 });
           doc.moveDown(0.3);
         }
 
         if (paper.methodology) {
           doc.fontSize(9).fillColor('#4a5568').text('Methodology:', { underline: true, indent: 20 });
-          doc.fontSize(9).fillColor('#000000').text(paper.methodology, { align: 'justify', indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(paper.methodology.substring(0, 400) + (paper.methodology.length > 400 ? '...' : ''), { align: 'justify', indent: 20 });
           doc.moveDown(0.3);
         }
 
         if (paper.algorithmsUsed && paper.algorithmsUsed.length > 0) {
-          doc.fontSize(9).fillColor('#4a5568').text(`Algorithms: ${paper.algorithmsUsed.join(', ')}`, { indent: 20 });
+          doc.fontSize(9).fillColor('#4a5568').text(`Algorithms: ${paper.algorithmsUsed.slice(0, 5).join(', ')}`, { indent: 20 });
+          doc.moveDown(0.3);
+        }
+        
+        if (paper.result) {
+          doc.fontSize(9).fillColor('#4a5568').text('Results:', { underline: true, indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(paper.result.substring(0, 300) + (paper.result.length > 300 ? '...' : ''), { align: 'justify', indent: 20 });
+          doc.moveDown(0.3);
         }
 
         doc.moveDown(0.8);
 
-        if (doc.y > 700 && index < analyzedPapers.slice(0, 10).length - 1) {
+        if (doc.y > 700 && index < paperAnalysisToShow.slice(0, 10).length - 1) {
           doc.addPage();
         }
       });
     } else {
-      doc.fontSize(10).fillColor('#718096').text('No analyzed papers available.');
+      doc.fontSize(10).fillColor('#718096').text('Phase 3 paper analysis is in progress or no data available yet.');
+      doc.moveDown();
+      
+      // Show Phase 2 papers as fallback
+      if (session.papers && session.papers.length > 0) {
+        doc.fontSize(10).fillColor('#4a5568').text(`Note: ${session.papers.length} papers were collected in Phase 2 and are being analyzed.`);
+      }
     }
-
-    // ========== PHASE 4: RESEARCH ANALYSIS ==========
-    if (doc.y > 650) doc.addPage();
-    addPhaseHeader(doc, 4, 'Methodology & Technology Analysis');
     
-    if (session.phase4Analysis) {
-      const analysis = session.phase4Analysis;
-
-      if (analysis.mostCommonMethodologies && analysis.mostCommonMethodologies.length > 0) {
-        doc.fontSize(12).fillColor('#2d3748').text('Most Common Methodologies:', { underline: true });
-        doc.moveDown(0.5);
-        analysis.mostCommonMethodologies.forEach((method, index) => {
-          doc.fontSize(10).fillColor('#1a365d').text(`${index + 1}. ${method.title || method}`, { continued: false });
-          if (method.description) {
-            doc.fontSize(9).fillColor('#4a5568').text(`   ${method.description}`, { align: 'justify' });
-          }
-          doc.moveDown(0.4);
-        });
-        doc.moveDown();
-      }
-
-      if (analysis.technologyOrAlgorithms && analysis.technologyOrAlgorithms.length > 0) {
-        doc.fontSize(12).fillColor('#2d3748').text('Technologies & Algorithms:', { underline: true });
-        doc.moveDown(0.5);
-        doc.fontSize(10).fillColor('#000000').list(analysis.technologyOrAlgorithms.slice(0, 20));
-        doc.moveDown();
-      }
-
-      if (analysis.datasetsUsed && analysis.datasetsUsed.length > 0) {
-        doc.fontSize(12).fillColor('#2d3748').text('Datasets Used:', { underline: true });
-        doc.moveDown(0.5);
-        doc.fontSize(10).fillColor('#000000').list(analysis.datasetsUsed.slice(0, 15));
-        doc.moveDown();
-      }
-
-      if (analysis.uniqueOrLessCommonApproaches && analysis.uniqueOrLessCommonApproaches.length > 0) {
-        doc.fontSize(12).fillColor('#2d3748').text('Unique & Innovative Approaches:', { underline: true });
-        doc.moveDown(0.5);
-        analysis.uniqueOrLessCommonApproaches.forEach((approach, index) => {
-          doc.fontSize(10).fillColor('#1a365d').text(`${index + 1}. ${approach.title || approach}`, { continued: false });
-          if (approach.description) {
-            doc.fontSize(9).fillColor('#4a5568').text(`   ${approach.description}`, { align: 'justify' });
-          }
-          doc.moveDown(0.4);
-        });
-      }
-    } else {
-      doc.fontSize(10).fillColor('#718096').text('Analysis data not available.');
+    // === GITHUB PROJECT ANALYSIS ===
+    if (doc.y > 650) doc.addPage();
+    doc.fontSize(14).fillColor('#1a365d').font('Helvetica-Bold').text('💻 GitHub Project Analysis', { underline: true });
+    doc.moveDown(0.5);
+    
+    // Try to get analysis data from phase3 data structure first
+    const phase3GithubData = session.phases?.phase3?.githubAnalysis?.data;
+    let githubAnalysisToShow = [];
+    
+    if (phase3GithubData && Array.isArray(phase3GithubData) && phase3GithubData.length > 0) {
+      // Use phase3 stored data - show all projects
+      githubAnalysisToShow = phase3GithubData;
+    } else if (session.githubProjects && Array.isArray(session.githubProjects) && session.githubProjects.length > 0) {
+      // Fallback to githubProjects array - show all projects
+      githubAnalysisToShow = session.githubProjects;
     }
-
-    // ========== PHASE 5: EXISTING SOLUTIONS ==========
-    if (doc.y > 650) doc.addPage();
-    addPhaseHeader(doc, 5, 'Existing Solutions & Tools');
     
-    if (session.phase5Solutions && session.phase5Solutions.length > 0) {
-      doc.fontSize(12).fillColor('#2d3748').text(`Solutions Identified: ${session.phase5Solutions.length}`, { underline: true });
+    if (githubAnalysisToShow.length > 0) {
+      doc.fontSize(12).fillColor('#2d3748').font('Helvetica').text(`GitHub Projects Analyzed: ${githubAnalysisToShow.length}`);
       doc.moveDown();
 
-      session.phase5Solutions.forEach((solution, index) => {
+      githubAnalysisToShow.slice(0, 8).forEach((project, index) => {
+        const projectTitle = project.title || project.name || project.full_name || 'Untitled Project';
         doc.fontSize(11).fillColor('#1a365d').font('Helvetica-Bold')
-           .text(`${index + 1}. ${solution.title || 'Untitled Solution'}`, { continued: false });
+           .text(`${index + 1}. ${projectTitle}`, { continued: false });
         
-        doc.fontSize(9).fillColor('#000000').font('Helvetica');
+        doc.fontSize(9).fillColor('#4a5568').font('Helvetica');
         
-        if (solution.summary) {
-          doc.text(solution.summary, { align: 'justify', indent: 20 });
+        // Show description if available (common in Phase 2 data)
+        if (project.description && !project.summary) {
+          doc.text('Description:', { underline: true, indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(project.description.substring(0, 400) + (project.description.length > 400 ? '...' : ''), { align: 'justify', indent: 20 });
+          doc.moveDown(0.3);
+        }
+        
+        if (project.summary) {
+          doc.text('Summary:', { underline: true, indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(project.summary.substring(0, 400) + (project.summary.length > 400 ? '...' : ''), { align: 'justify', indent: 20 });
+          doc.moveDown(0.3);
+        }
+        
+        if (project.analysis) {
+          doc.text('Analysis:', { underline: true, indent: 20 });
+          doc.fontSize(9).fillColor('#000000').text(project.analysis.substring(0, 400) + (project.analysis.length > 400 ? '...' : ''), { align: 'justify', indent: 20 });
           doc.moveDown(0.3);
         }
 
-        if (solution.features && solution.features.length > 0) {
+        if (project.keyFeatures && project.keyFeatures.length > 0) {
           doc.fontSize(9).fillColor('#4a5568').text('Key Features:', { indent: 20 });
-          solution.features.slice(0, 5).forEach(feature => {
+          project.keyFeatures.slice(0, 5).forEach(feature => {
             doc.fontSize(8).fillColor('#000000').text(`• ${feature}`, { indent: 30 });
           });
           doc.moveDown(0.3);
         }
 
-        if (solution.targetUsers) {
-          doc.fontSize(9).fillColor('#4a5568').text(`Target Users: ${solution.targetUsers}`, { indent: 20 });
-        }
-
-        if (solution.platformType) {
-          doc.fontSize(9).fillColor('#4a5568').text(`Platform: ${solution.platformType}`, { indent: 20 });
+        if (project.technologiesUsed && project.technologiesUsed.length > 0) {
+          doc.fontSize(9).fillColor('#4a5568').text(`Technologies: ${project.technologiesUsed.slice(0, 5).join(', ')}`, { indent: 20 });
         }
 
         doc.moveDown(0.8);
 
-        if (doc.y > 700 && index < session.phase5Solutions.length - 1) {
+        if (doc.y > 700 && index < githubAnalysisToShow.slice(0, 8).length - 1) {
           doc.addPage();
         }
       });
-
-      if (session.phase5Notes) {
-        doc.moveDown();
-        doc.fontSize(11).fillColor('#2d3748').text('Additional Notes:', { underline: true });
-        doc.fontSize(9).fillColor('#000000').text(session.phase5Notes, { align: 'justify' });
-      }
     } else {
-      doc.fontSize(10).fillColor('#718096').text('No existing solutions identified.');
+      doc.fontSize(10).fillColor('#718096').text('Phase 3 GitHub analysis is in progress or no data available yet.');
+      doc.moveDown();
+      
+      // Show Phase 2 GitHub projects as fallback
+      if (session.githubProjects && session.githubProjects.length > 0) {
+        doc.fontSize(10).fillColor('#4a5568').text(`Note: ${session.githubProjects.length} GitHub projects were collected in Phase 2 and are being analyzed.`);
+      }
     }
 
-    // ========== PHASE 6: BEST SOLUTION ==========
+    // ========== PHASE 4: BEST SOLUTION ==========
     if (doc.y > 650) doc.addPage();
-    addPhaseHeader(doc, 6, 'Recommended Best Solution');
+    addPhaseHeader(doc, 4, 'Best Solution & Recommendations');
     
     if (session.phase6Solution) {
       const solution = session.phase6Solution;
