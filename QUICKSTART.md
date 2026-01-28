@@ -14,7 +14,7 @@ Get your Researcher platform deployed on a VPS in under 30 minutes.
 
 ```bash
 # Connect to your server
-ssh root@your-server-ip
+ssh root@194.238.17.210
 
 # Update system
 sudo apt update && sudo apt upgrade -y
@@ -77,7 +77,7 @@ sudo nano /etc/nginx/sites-available/researcher
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com www.yourdomain.com;
+    server_name researcher.synthomind.cloud www.researcher.synthomind.cloud;
     
     root /var/www/researcher/client/build;
     index index.html;
@@ -119,7 +119,7 @@ sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx
 
 # Get SSL certificate
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+sudo certbot --nginx -d researcher.synthomind.cloud -d www.researcher.synthomind.cloud
 
 # Follow prompts (enter email, agree to terms)
 ```
@@ -166,8 +166,8 @@ sudo ufw status
 
 Visit these URLs to confirm everything works:
 
-1. **Health Check**: `https://yourdomain.com/api/health`
-2. **Frontend**: `https://yourdomain.com`
+1. **Health Check**: `https://researcher.synthomind.cloud/api/health`
+2. **Frontend**: `https://researcher.synthomind.cloud`
 3. **Sign up** and **log in**
 4. **Create research** and test all phases
 5. **Submit feedback**
@@ -327,7 +327,7 @@ If you encounter issues:
 Your Researcher platform is now live and running in production.
 
 **Test your deployment:**
-- ✅ Visit `https://yourdomain.com`
+- ✅ Visit `https://researcher.synthomind.cloud`
 - ✅ Create an account
 - ✅ Start a new research project
 - ✅ Monitor with `pm2 monit`

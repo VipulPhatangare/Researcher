@@ -39,7 +39,7 @@
 
 ## SSL Certificate
 - [ ] Install Certbot: `sudo apt install certbot python3-certbot-nginx`
-- [ ] Obtain certificate: `sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com`
+- [ ] Obtain certificate: `sudo certbot --nginx -d researcher.synthomind.cloud`
 - [ ] Test auto-renewal: `sudo certbot renew --dry-run`
 - [ ] Verify renewal timer: `sudo systemctl status certbot.timer`
 
@@ -61,8 +61,8 @@
 - [ ] Review Nginx security headers
 
 ## Post-Deployment Testing
-- [ ] Health check: `https://yourdomain.com/api/health`
-- [ ] Frontend loads: `https://yourdomain.com`
+- [ ] Health check: `https://researcher.synthomind.cloud/api/health`
+- [ ] Frontend loads: `https://researcher.synthomind.cloud`
 - [ ] Sign up new user
 - [ ] Login existing user
 - [ ] Create new research session

@@ -138,9 +138,7 @@ N8N_WEBHOOK_PHASE1_URL=https://your-n8n.com/webhook/phase-1
 
 ### Frontend (client/.env) 
 ```env
-REACT_APP_API_URL=https://yourdomain.com/api
-```
-
+REACT_APP_API_URL=https://researcher.synthomind.cloud/api
 ## 🛠️ Deployment Tools Included
 
 ### PM2 Scripts
@@ -181,7 +179,7 @@ After deployment, verify:
 
 ```bash
 # 1. Check health endpoint
-curl https://yourdomain.com/api/health
+curl https://researcher.synthomind.cloud/api/health
 
 # 2. Check PM2 status
 pm2 status
@@ -196,8 +194,8 @@ pm2 monit
 ## 📱 Test Your Deployment
 
 Visit these URLs:
-1. ✅ **Frontend**: `https://yourdomain.com`
-2. ✅ **Health Check**: `https://yourdomain.com/api/health`
+1. ✅ **Frontend**: `https://researcher.synthomind.cloud`
+2. ✅ **Health Check**: `https://researcher.synthomind.cloud/api/health`
 3. ✅ **Sign Up**: Create a new account
 4. ✅ **Research**: Start a research session
 5. ✅ **All Phases**: Test Phase 1 through Phase 6

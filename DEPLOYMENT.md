@@ -167,18 +167,18 @@ sudo nano /etc/nginx/sites-available/researcher
 # Redirect HTTP to HTTPS
 server {
     listen 80;
-    server_name yourdomain.com www.yourdomain.com;
+    server_name researcher.synthomind.cloud;
     return 301 https://$server_name$request_uri;
 }
 
 # HTTPS Server Block
 server {
     listen 443 ssl http2;
-    server_name yourdomain.com www.yourdomain.com;
+    server_name researcher.synthomind.cloud;
 
     # SSL certificates (will be configured with Certbot)
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/researcher.synthomind.cloud/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/researcher.synthomind.cloud/privkey.pem;
     
     # SSL Configuration
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -268,7 +268,7 @@ sudo apt install -y certbot python3-certbot-nginx
 
 ### 2. Obtain SSL Certificate
 ```bash
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+sudo certbot --nginx -d researcher.synthomind.cloud
 ```
 
 Follow the prompts:
@@ -603,8 +603,8 @@ sudo tail -f /var/log/nginx/error.log
 
 After deployment, verify everything is working:
 
-1. **Health Check**: Visit `https://yourdomain.com/api/health`
-2. **Frontend**: Visit `https://yourdomain.com`
+1. **Health Check**: Visit `https://researcher.synthomind.cloud/api/health`
+2. **Frontend**: Visit `https://researcher.synthomind.cloud`
 3. **Login/Signup**: Test authentication
 4. **Create Research**: Test all 6 phases
 5. **Feedback**: Submit feedback

@@ -32,7 +32,7 @@ Create a `.env` file in the `client` directory:
 
 ```env
 # Production API URL
-REACT_APP_API_URL=https://yourdomain.com/api
+REACT_APP_API_URL=https://researcher.synthomind.cloud/api
 
 # Or for deployment where backend is on same domain
 # REACT_APP_API_URL=/api
@@ -104,7 +104,7 @@ In production, restrict CORS to your domain:
 // server.js
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com', 'https://www.yourdomain.com']
+    ? ['https://researcher.synthomind.cloud']
     : '*',
   credentials: true
 };
@@ -291,13 +291,13 @@ Set up external monitoring:
 - StatusCake
 
 Monitor:
-- `https://yourdomain.com/api/health`
+- `https://researcher.synthomind.cloud/api/health`
 - Response time < 2 seconds
 - 24/7 availability
 
 ### Manual Health Check
 ```bash
-curl https://yourdomain.com/api/health
+curl https://researcher.synthomind.cloud/api/health
 ```
 
 Expected response:
