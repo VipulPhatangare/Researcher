@@ -249,8 +249,8 @@ const ResearchWorkspace = () => {
   };
 
   const handlePhaseClick = (phaseNum) => {
-    // Phase 6 (Chat) should always open directly without any modal
-    if (phaseNum === 6) {
+    // Phase 7 (Chat) should always open directly without any modal
+    if (phaseNum === 7) {
       setSelectedPhase(phaseNum);
       setSidebarOpen(false);
       return;

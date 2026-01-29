@@ -41,57 +41,36 @@ export const generatePDFReport = async (req, res) => {
     // Pipe PDF to response
     doc.pipe(res);
 
-    // Store TOC entries for later generation
-    const tocEntries = [];
-
     // ========== COVER PAGE ==========
     addCoverPage(doc, session, chatId);
-
-    // ========== TABLE OF CONTENTS ==========
-    doc.addPage();
-    const tocPage = doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1;
     
     // ========== EXECUTIVE SUMMARY ==========
     doc.addPage();
-    tocEntries.push({ title: 'Executive Summary', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addExecutiveSummary(doc, session);
-
-    // ========== STATISTICS DASHBOARD ==========
-    doc.addPage();
-    tocEntries.push({ title: 'Research Statistics', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
-    addStatisticsDashboard(doc, session);
 
     // ========== PHASE 1: PROMPT ENHANCEMENT ==========
     doc.addPage();
-    tocEntries.push({ title: 'Phase 1: Prompt Enhancement', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase1(doc, session);
 
     // ========== PHASE 2: RESEARCH DISCOVERY ==========
     if (doc.y > 650) doc.addPage();
-    tocEntries.push({ title: 'Phase 2: Research Discovery', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase2(doc, session);
 
     // ========== PHASE 3: ANALYSIS & SYNTHESIS ==========
     if (doc.y > 650) doc.addPage();
-    tocEntries.push({ title: 'Phase 3: Deep Analysis', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase3(doc, session);
     
     // ========== PHASE 4: GAP ANALYSIS ==========
     if (doc.y > 650) doc.addPage();
-    tocEntries.push({ title: 'Phase 4: Gap Analysis', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase4GapAnalysis(doc, session);
 
     // ========== PHASE 5: LITERATURE REVIEW ==========
     if (doc.y > 650) doc.addPage();
-    tocEntries.push({ title: 'Phase 5: Literature Review', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase5LiteratureReview(doc, session);
 
     // ========== PHASE 6: BEST SOLUTION ==========
     if (doc.y > 650) doc.addPage();
-    tocEntries.push({ title: 'Phase 6: Best Solution', page: doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1 });
     addPhase6(doc, session);
-    // ========== GENERATE TABLE OF CONTENTS ==========
-    generateTableOfContents(doc, tocPage, tocEntries);
 
     // ========== ADD PAGE NUMBERS ==========
     const pages = doc.bufferedPageRange();
@@ -181,31 +160,67 @@ function addCoverPage(doc, session, chatId) {
 function generateTableOfContents(doc, tocPage, tocEntries) {
   doc.switchToPage(tocPage);
   
-  doc.fontSize(24).font('Helvetica-Bold').fillColor('#1a365d')
+  // Title
+  doc.fontSize(28).font('Helvetica-Bold').fillColor('#1a365d')
      .text('Table of Contents', { align: 'center' });
   
-  doc.moveDown(2);
+  doc.moveDown(2.5);
   
   tocEntries.forEach((entry, index) => {
     const isPhase = entry.title.startsWith('Phase');
     
+    // Set font sizes and colors
     if (isPhase) {
-      doc.fontSize(12).fillColor('#2d3748').font('Helvetica-Bold');
+      doc.fontSize(13).fillColor('#1a365d').font('Helvetica-Bold');
     } else {
       doc.fontSize(11).fillColor('#4a5568').font('Helvetica');
     }
     
     const yPos = doc.y;
-    doc.text(entry.title, 50, yPos, { continued: false, width: 400 });
-    doc.text(`${entry.page}`, 450, yPos, { align: 'right', width: 95 });
+    const leftMargin = isPhase ? 60 : 80;
+    const pageNumberX = 520;
+    const maxTitleWidth = pageNumberX - leftMargin - 20;
     
-    doc.moveDown(isPhase ? 0.8 : 0.5);
+    // Draw title on left
+    doc.text(entry.title, leftMargin, yPos, { 
+      continued: false, 
+      width: maxTitleWidth,
+      lineBreak: false
+    });
     
-    // Add separator line for phases
-    if (isPhase && index < tocEntries.length - 1) {
+    // Draw dotted line
+    const titleWidth = doc.widthOfString(entry.title);
+    const actualTitleEnd = Math.min(titleWidth, maxTitleWidth);
+    const dotStartX = leftMargin + actualTitleEnd + 5;
+    const dotEndX = pageNumberX - 5;
+    
+    if (dotEndX > dotStartX) {
+      doc.save();
+      doc.strokeColor('#cbd5e0')
+         .lineWidth(0.5)
+         .dash(2, 4);
+      doc.moveTo(dotStartX, yPos + 7)
+         .lineTo(dotEndX, yPos + 7)
+         .stroke();
+      doc.undash();
+      doc.restore();
+    }
+    
+    // Draw page number on right (at same Y position)
+    doc.font('Helvetica-Bold').fillColor('#2d3748')
+       .text(`${entry.page}`, pageNumberX, yPos, { 
+         width: 25,
+         align: 'right'
+       });
+    
+    // Move down for next entry
+    doc.moveDown(isPhase ? 1.2 : 0.7);
+    
+    // Add subtle separator after phases (except last)
+    if (isPhase && index < tocEntries.length - 1 && !tocEntries[index + 1]?.title.startsWith('Phase')) {
       doc.strokeColor('#e2e8f0').lineWidth(0.5)
-         .moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-      doc.moveDown(0.3);
+         .moveTo(60, doc.y).lineTo(545, doc.y).stroke();
+      doc.moveDown(0.5);
     }
   });
 }
